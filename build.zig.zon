@@ -1,0 +1,14 @@
+.{
+    .name = .liscript,
+    .version = "0.0.0",
+    //.fingerprint = 0xc1ce1081a21c4ad4,
+    .fingerprint = 0x510b453201ff0be3,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        //"LICENSE",
+    },
+}
+
