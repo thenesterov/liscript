@@ -7,6 +7,8 @@ const isocline = @import("isocline");
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
 
+    try isocline.set_history(allocator, ".liscript_history", 2048);
+
     while (try isocline.readline(allocator, "")) |input| {
         defer std.c.free(input.ptr); 
 

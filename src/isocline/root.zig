@@ -25,3 +25,12 @@ pub fn printf(allocator: std.mem.Allocator, comptime fmt: []const u8, args: anyt
     @call(.auto, c.ic_printf, .{c_fmt_ptr});
 }
 
+pub fn set_history(allocator: std.mem.Allocator, filename: []const u8, max_entries: i64) !void {
+    const filename_c = try allocator.dupeZ(u8, filename);
+    defer allocator.free(filename_c);
+
+    const filename_ptr: [*c]const c_char = @ptrCast(filename_c.ptr);
+
+    c.ic_set_history(filename_ptr, @intCast(max_entries));
+}
+
