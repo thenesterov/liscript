@@ -66,7 +66,7 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     const core = b.addModule("liscript-core", .{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/core/root.zig"),
         .target = target,
     });
 
@@ -84,7 +84,7 @@ pub fn build(b: *std.Build) !void {
     const repl = b.addExecutable(.{
         .name = "liscript-repl",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/repl.zig"),
+            .root_source_file = b.path("src/repl/main.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
