@@ -87,7 +87,12 @@ pub const Symbol = packed struct {
 
     pub fn repr(self: Symbol, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
         const name = symbol_table.getName(self.getId());
-        try writer.print("{s}", .{name});
+        if (std.mem.indexOfAny(u8, name, " \r\t\\\"") != null) {
+            try writer.print("@", .{});
+            try escapeString(name, writer);
+        } else {
+            try writer.print("{s}", .{name});
+        }
     }
 };
 
@@ -123,22 +128,7 @@ pub const Object = struct {
 
     pub fn repr(self: Object, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
         switch (self.body) {
-            .string => |str| {
-                try writer.print("\"", .{});
-
-                for (str) |char| {
-                    switch (char) {
-                        '\n' => try writer.print("\\n", .{}),
-                        '\r' => try writer.print("\\r", .{}),
-                        '\t' => try writer.print("\\t", .{}),
-                        '"' => try writer.print("\"", .{}),
-                        '\\' => try writer.print("\\", .{}),
-                        else => try writer.writeByte(char),
-                    }
-                }
-
-                try writer.print("\"", .{});
-            },
+            .string => |str| try escapeString(str, writer),
 
             .cons => |pair| {
                 try writer.print("(", .{});
@@ -180,3 +170,20 @@ pub const AstNode = union(enum) {
         }
     }
 };
+
+fn escapeString(raw_string: []const u8, w: *std.Io.Writer) !void {
+    try w.print("\"", .{});
+
+    for (raw_string) |char| {
+        switch (char) {
+            '\n' => try w.print("\\n", .{}),
+            '\r' => try w.print("\\r", .{}),
+            '\t' => try w.print("\\t", .{}),
+            '"' => try w.print("\\\"", .{}),
+            '\\' => try w.print("\\", .{}),
+            else => try w.writeByte(char),
+        }
+    }
+
+    try w.print("\"", .{});
+}
