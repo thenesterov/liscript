@@ -8,11 +8,7 @@ const IsoclineCLibrary = struct {
     lib: *Step.Compile,
     module: *std.Build.Module,
 
-    fn init(
-        b: *std.Build,
-        target: ResolvedTarget,
-        optimize: OptimizeMode
-    ) !IsoclineCLibrary {
+    fn init(b: *std.Build, target: ResolvedTarget, optimize: OptimizeMode) !IsoclineCLibrary {
         const src_path = try IsoclineCLibrary.getSrcPath(b);
 
         const translate_c = b.addTranslateC(.{
@@ -49,13 +45,13 @@ const IsoclineCLibrary = struct {
     }
 
     fn getHeaderFile(b: *std.Build, src_path: []const u8) std.Build.LazyPath {
-        const header_path = b.fmt("{s}/include/isocline.h", .{ src_path });
+        const header_path = b.fmt("{s}/include/isocline.h", .{src_path});
 
         return .{ .cwd_relative = header_path };
     }
 
     fn getSourceFile(b: *std.Build, src_path: []const u8) std.Build.LazyPath {
-        const source_path = b.fmt("{s}/src/isocline.c", .{ src_path });
+        const source_path = b.fmt("{s}/src/isocline.c", .{src_path});
 
         return .{ .cwd_relative = source_path };
     }
@@ -65,9 +61,17 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const str_utils = b.addModule("str-utils", .{
+        .root_source_file = b.path("src/str/utils.zig"),
+        .target = target,
+    });
+
     const core = b.addModule("liscript-core", .{
         .root_source_file = b.path("src/core/root.zig"),
         .target = target,
+        .imports = &.{
+            .{ .name = "str", .module = str_utils },
+        },
     });
 
     const isocline_c: IsoclineCLibrary = try .init(b, target, optimize);
@@ -90,6 +94,7 @@ pub fn build(b: *std.Build) !void {
             .imports = &.{
                 .{ .name = "liscript", .module = core },
                 .{ .name = "isocline", .module = isocline },
+                .{ .name = "str", .module = str_utils },
             },
         }),
     });
@@ -109,4 +114,3 @@ pub fn build(b: *std.Build) !void {
         run_repl_cmd.addArgs(args);
     }
 }
-

@@ -1,4 +1,7 @@
 const std = @import("std");
+
+const str = @import("str");
+
 const SymbolTable = @import("symbol_table.zig").SymbolTable;
 
 pub const Float = packed struct {
@@ -89,7 +92,7 @@ pub const Symbol = packed struct {
         const name = symbol_table.getName(self.getId());
         if (std.mem.indexOfAny(u8, name, " \r\t\\\"") != null) {
             try writer.print("@", .{});
-            try escapeString(name, writer);
+            try str.escape(name, writer);
         } else {
             try writer.print("{s}", .{name});
         }
@@ -128,7 +131,11 @@ pub const Object = struct {
 
     pub fn repr(self: Object, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
         switch (self.body) {
-            .string => |str| try escapeString(str, writer),
+            .string => |string| {
+                try writer.print("\"", .{});
+                try str.escape(string, writer);
+                try writer.print("\"", .{});
+            },
 
             .cons => |pair| {
                 try writer.print("(", .{});
@@ -159,6 +166,23 @@ pub const AstNode = union(enum) {
     symbol: Symbol,
     object: ObjectPtr,
 
+    pub fn deinit(self: AstNode, allocator: std.mem.Allocator) void {
+        switch (self) {
+            .object => |object| {
+                const object_ptr = object.getPtr(*const Object);
+                switch (object_ptr.body) {
+                    .cons => |cons| {
+                        cons.cdr.deinit(allocator);
+                        cons.car.deinit(allocator);
+                    },
+                    .string => |string| allocator.free(string),
+                }
+                allocator.destroy(object_ptr);
+            },
+            else => {},
+        }
+    }
+
     pub fn repr(self: AstNode, symbol_table: SymbolTable, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         switch (self) {
             .int => |i| try i.repr(writer),
@@ -171,19 +195,37 @@ pub const AstNode = union(enum) {
     }
 };
 
-fn escapeString(raw_string: []const u8, w: *std.Io.Writer) !void {
-    try w.print("\"", .{});
+pub fn makeFloat(f: f64) AstNode {
+    return AstNode{ .float = Float.from(f) };
+}
 
-    for (raw_string) |char| {
-        switch (char) {
-            '\n' => try w.print("\\n", .{}),
-            '\r' => try w.print("\\r", .{}),
-            '\t' => try w.print("\\t", .{}),
-            '"' => try w.print("\\\"", .{}),
-            '\\' => try w.print("\\", .{}),
-            else => try w.writeByte(char),
-        }
-    }
+pub fn makeInt(i: i32) AstNode {
+    return AstNode{ .int = Int.from(i) };
+}
 
-    try w.print("\"", .{});
+pub fn makeNil() AstNode {
+    return AstNode{ .nil = Nil.from() };
+}
+
+pub fn makeCons(allocator: std.mem.Allocator, car: AstNode, cdr: AstNode) !AstNode {
+    const obj = try allocator.create(Object);
+    obj.* = .{ .body = .{ .cons = .{
+        .car = car,
+        .cdr = cdr,
+    } } };
+    return AstNode{ .object = ObjectPtr.fromPtr(obj) };
+}
+
+pub fn makeBool(b: bool) AstNode {
+    return AstNode{ .bool = Bool.from(b) };
+}
+
+pub fn makeSymbol(symbol: Symbol) AstNode {
+    return AstNode{ .symbol = symbol };
+}
+
+pub fn makeString(allocator: std.mem.Allocator, string: []const u8) !AstNode {
+    const obj = try allocator.create(Object);
+    obj.* = .{ .body = .{ .string = string } };
+    return AstNode{ .object = ObjectPtr.fromPtr(obj) };
 }
