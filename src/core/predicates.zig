@@ -83,6 +83,7 @@ pub const Equal = struct {
                         },
                         .lambda => false,
                         .dambda => false,
+                        .macro => false,
                     };
 
                     break :res result;

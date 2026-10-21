@@ -22,6 +22,8 @@ pub const SpecialFormError = error{
     LambdaBodyCantBeEmpty,
     DambdaArgsMustBeList,
     DambdaBodyCantBeEmpty,
+    MacroArgsMustBeList,
+    MacroBodyCantBeEmpty,
 };
 
 pub const SpecialForm = struct {
@@ -675,5 +677,26 @@ pub const Dambda = MakeSpecialForm("dambda", struct {
         }
 
         return SpecialFormError.DambdaArgsMustBeList;
+    }
+}.exec);
+
+pub const Macro = MakeSpecialForm("macro", struct {
+    fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        _ = environment;
+        _ = evaluator;
+
+        const this = @as(@TypeOf(self), self);
+
+        var iter = ListIter.init(body);
+
+        if (iter.next(.cons) orelse iter.next(.nil)) |args| {
+            if (iter.next(.any)) |body_| {
+                return try ast.makeMacro(this.allocator, args, body_);
+            }
+
+            return SpecialFormError.MacroBodyCantBeEmpty;
+        }
+
+        return SpecialFormError.MacroArgsMustBeList;
     }
 }.exec);

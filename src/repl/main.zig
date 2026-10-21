@@ -86,6 +86,7 @@ pub fn main(init: std.process.Init) !void {
     const set = try special_forms.Set.init(runtime_arena, &symbol_table);
     const lambda = try special_forms.Lambda.init(runtime_arena, &symbol_table);
     const dambda = try special_forms.Dambda.init(runtime_arena, &symbol_table);
+    const macro = try special_forms.Macro.init(runtime_arena, &symbol_table);
 
     try quote.register(&environment);
     try typeof.register(&environment);
@@ -104,6 +105,7 @@ pub fn main(init: std.process.Init) !void {
     try set.register(&environment);
     try lambda.register(&environment);
     try dambda.register(&environment);
+    try macro.register(&environment);
 
     const evaluator = liscript.Evaluator.init(runtime_arena, &symbol_table, stdout_writer, stdin_reader);
 

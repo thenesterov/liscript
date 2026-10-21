@@ -17,6 +17,7 @@ pub const EvaluatorError = error{
     CantCurryDambda,
     LambdaArgMustBeSymbol,
     DambdaArgMustBeSymbol,
+    MacroArgMustBeSymbol,
     OperatorMustTakeAtLeastOneArgument,
 };
 
@@ -58,6 +59,7 @@ pub const Evaluator = struct {
             .object => res: {
                 if (ast.isLambda(head)) |lambda| break :res try self.callLambda(lambda, cons, environment_);
                 if (ast.isDambda(head)) |dambda| break :res try self.callDambda(dambda, cons, environment_);
+                if (ast.isMacro(head)) |macro| break :res try self.callMacro(macro, cons, environment_);
                 return EvaluatorError.CantCallLiteral;
             },
             else => return EvaluatorError.CantCallLiteral,
@@ -148,18 +150,6 @@ pub const Evaluator = struct {
             }
 
             if (vals_iter.current == .nil) {
-                var rest_args = ast.makeNil();
-                var tail_ptr: *AstNode = &rest_args;
-
-                while (args_iter.next(.symbol)) |arg| {
-                    const arg_cons = try ast.makeCons(self.allocator, arg, ast.makeNil());
-
-                    tail_ptr.* = arg_cons;
-
-                    const arg_cons_ptr = arg_cons.object.getPtr(*Object);
-                    tail_ptr = &arg_cons_ptr.body.cons.cdr;
-                }
-
                 return EvaluatorError.CantCurryDambda;
             }
 
@@ -172,6 +162,79 @@ pub const Evaluator = struct {
         }
 
         return try self.evaluate(dambda.body, new_env_ptr);
+    }
+
+    fn callMacro(self: Evaluator, macro: ast.Macro, cons: ast.Cons, environment_: *Environment) !AstNode {
+        const rest_vals_symbol = try self.symbol_table.insert("..."); // todo вынести в константу
+
+        const new_env_ptr = try self.allocator.create(Environment);
+        new_env_ptr.* = Environment.init(self.allocator, null);
+        new_env_ptr.global = new_env_ptr;
+
+        var args_iter = ListIter.init(macro.args);
+        var vals_iter = ListIter.init(cons.cdr);
+
+        while (true) {
+            if (args_iter.current == .nil) {
+                var rest_vals = ast.makeNil();
+                var tail_ptr: *AstNode = &rest_vals;
+
+                while (vals_iter.next(.any)) |val| {
+                    const evaluated_val = try self.evaluate(val, environment_);
+                    const val_cons = try ast.makeCons(self.allocator, evaluated_val, ast.makeNil());
+
+                    tail_ptr.* = val_cons;
+
+                    const val_cons_ptr = val_cons.object.getPtr(*Object);
+                    tail_ptr = &val_cons_ptr.body.cons.cdr;
+                }
+
+                try new_env_ptr.def(rest_vals_symbol, rest_vals);
+                break;
+            }
+
+            if (vals_iter.current == .nil) {
+                var rest_args = ast.makeNil();
+                var tail_ptr: *AstNode = &rest_args;
+
+                while (args_iter.next(.symbol)) |arg| {
+                    const arg_cons = try ast.makeCons(self.allocator, arg, ast.makeNil());
+
+                    tail_ptr.* = arg_cons;
+
+                    const arg_cons_ptr = arg_cons.object.getPtr(*Object);
+                    tail_ptr = &arg_cons_ptr.body.cons.cdr;
+                }
+
+                return try ast.makeMacro(self.allocator, rest_args, try self.macroExpand(macro.body, new_env_ptr));
+            }
+
+            const arg = args_iter.next(.symbol) orelse return EvaluatorError.MacroArgMustBeSymbol;
+            const val = vals_iter.next(.any) orelse break;
+
+            try new_env_ptr.def(arg.symbol, val);
+        }
+
+        return try self.evaluate(try self.macroExpand(macro.body, new_env_ptr), environment_);
+    }
+
+    fn macroExpand(self: Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
+        return switch (node) {
+            .symbol => |symbol| environment_.get(symbol),
+
+            .object => |object| res: {
+                const object_ptr = object.getPtr(*const Object);
+                break :res switch (object_ptr.body) {
+                    .cons => |cons| try ast.makeCons(
+                        self.allocator,
+                        try self.macroExpand(cons.car, environment_),
+                        try self.macroExpand(cons.cdr, environment_),
+                    ),
+                    else => node,
+                };
+            },
+            else => node,
+        };
     }
 
     fn foldOperator(self: Evaluator, operator: Operator, cdr: AstNode, environment_: *Environment) !AstNode {

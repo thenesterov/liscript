@@ -141,12 +141,18 @@ pub const Dambda = struct {
     body: AstNode,
 };
 
+pub const Macro = struct {
+    args: AstNode,
+    body: AstNode,
+};
+
 pub const Object = struct {
     body: union(enum) {
         cons: Cons,
         string: []const u8,
         lambda: Lambda,
         dambda: Dambda,
+        macro: Macro,
     },
 
     pub fn repr(self: Object, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
@@ -188,6 +194,18 @@ pub const Object = struct {
             },
             .dambda => |dambda| {
                 try writer.print("(dambda ", .{});
+
+                if (isNil(dambda.args)) |_| {
+                    try writer.print("()", .{});
+                } else {
+                    try dambda.args.repr(symbol_table, writer);
+                }
+                try writer.print(" ", .{});
+                try dambda.body.repr(symbol_table, writer);
+                try writer.print(")", .{});
+            },
+            .macro => |dambda| {
+                try writer.print("(macro ", .{});
 
                 if (isNil(dambda.args)) |_| {
                     try writer.print("()", .{});
@@ -242,6 +260,10 @@ pub const AstNode = union(enum) {
                     .dambda => |dambda| {
                         dambda.args.deinit(allocator);
                         dambda.body.deinit(allocator);
+                    },
+                    .macro => |macro| {
+                        macro.args.deinit(allocator);
+                        macro.body.deinit(allocator);
                     },
                 }
                 allocator.destroy(object_ptr);
@@ -310,6 +332,12 @@ pub fn makeDambda(allocator: std.mem.Allocator, args: AstNode, body: AstNode) !A
     return AstNode{ .object = ObjectPtr.fromPtr(obj) };
 }
 
+pub fn makeMacro(allocator: std.mem.Allocator, args: AstNode, body: AstNode) !AstNode {
+    const obj = try allocator.create(Object);
+    obj.* = .{ .body = .{ .macro = .{ .args = args, .body = body } } };
+    return AstNode{ .object = ObjectPtr.fromPtr(obj) };
+}
+
 pub fn isNil(node: AstNode) ?Nil {
     return switch (node) {
         .nil => |nil| nil,
@@ -375,6 +403,19 @@ pub fn isDambda(node: AstNode) ?Dambda {
             const object_ptr = object.getPtr(*const Object);
             break :res switch (object_ptr.body) {
                 .dambda => |dambda| dambda,
+                else => null,
+            };
+        },
+        else => null,
+    };
+}
+
+pub fn isMacro(node: AstNode) ?Macro {
+    return switch (node) {
+        .object => |object| res: {
+            const object_ptr = object.getPtr(*const Object);
+            break :res switch (object_ptr.body) {
+                .macro => |macro| macro,
                 else => null,
             };
         },
