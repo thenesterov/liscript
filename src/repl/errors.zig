@@ -20,7 +20,7 @@ fn printError(allocator: Allocator, details: ErrorDetails, span: Span) !void {
     try isocline.printf(allocator, "[firebrick]{s} at line {d}, col {d}.[/]\n", .{ details.message, span.row, span.col });
 
     if (details.note) |note| {
-        try isocline.printf(allocator, "[steelblue]note: {s}[/]\n\n", .{note});
+        try isocline.printf(allocator, "[steelblue]note:[/] [gray]{s}[/]\n\n", .{note});
     } else {
         try isocline.printf(allocator, "\n", .{});
     }

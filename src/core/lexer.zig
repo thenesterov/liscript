@@ -1,3 +1,5 @@
+const std = @import("std");
+
 const str = @import("str");
 
 pub const Token = union(enum) {
@@ -8,6 +10,7 @@ pub const Token = union(enum) {
     float: []const u8,
     quoted_symbol: []const u8,
     identifier: []const u8,
+    quote: void,
     eof: void,
 };
 
@@ -44,6 +47,11 @@ pub const Lexer = struct {
 
         switch (char) {
             '"' => return try self.readString(),
+            ';' => {
+                self.skipComment();
+                return try self.nextToken();
+            },
+            // '-' => return try self.readNumber(),
             '0'...'9' => return try self.readNumber(),
             '@' => return try self.readQuotedSymbol(),
             '(' => {
@@ -53,6 +61,10 @@ pub const Lexer = struct {
             ')' => {
                 self.advance();
                 return .r_paren;
+            },
+            '\'' => {
+                self.advance();
+                return .quote;
             },
             else => return try self.readIdentifier(),
         }
@@ -87,6 +99,13 @@ pub const Lexer = struct {
                 self.col = 1;
             }
             if (!str.inludesChar(self.token_delimiters, char)) break;
+            self.advance();
+        }
+    }
+
+    fn skipComment(self: *Lexer) void {
+        while (self.peekChar()) |char| {
+            if (char == '\n') break;
             self.advance();
         }
     }
@@ -136,6 +155,10 @@ pub const Lexer = struct {
 
         while (self.peekChar()) |char| {
             switch (char) {
+                '-' => {
+                    if (start_pos != self.cursor) return LexerError.IncorrectNumberFormat;
+                    self.advance();
+                },
                 '0'...'9' => self.advance(),
                 '.' => {
                     switch (is_float) {

@@ -26,12 +26,13 @@ const ParseOptions = struct {
 
 pub const Parser = struct {
     allocator: Allocator,
+    runtime_allocator: Allocator,
 
     lexer: *Lexer,
     symbol_table: *SymbolTable,
 
-    pub fn init(allocator: Allocator, lexer_: *Lexer, symbol_table_: *SymbolTable) Parser {
-        return .{ .allocator = allocator, .lexer = lexer_, .symbol_table = symbol_table_ };
+    pub fn init(allocator: Allocator, runtime_allocator: Allocator, lexer_: *Lexer, symbol_table_: *SymbolTable) Parser {
+        return .{ .allocator = allocator, .runtime_allocator = runtime_allocator, .lexer = lexer_, .symbol_table = symbol_table_ };
     }
 
     pub fn parse(self: *Parser, opts: ParseOptions) (LexerError || ParserError || StrError || Allocator.Error)!AstNode {
@@ -41,7 +42,7 @@ pub const Parser = struct {
             .l_paren => try self.parseList(),
             .string => |string| res: {
                 const unescaped_string = try str.unescape(self.allocator, string);
-                break :res try ast.makeString(self.allocator, unescaped_string);
+                break :res try ast.makeString(self.runtime_allocator, unescaped_string);
             },
             .integer => |integer| res: {
                 const parsed_int = std.fmt.parseInt(i32, integer, 10) catch return ParserError.IncorrectNumberFormat;
@@ -63,6 +64,15 @@ pub const Parser = struct {
                 const symbol = try self.symbol_table.insert(identifier);
                 break :res ast.makeSymbol(symbol);
             },
+            .quote => res: {
+                const symbol = try self.symbol_table.insert("quote");
+                const quote_symbol = ast.makeSymbol(symbol);
+
+                const quoted_expr = try self.parse(.{});
+
+                const args = try ast.makeCons(self.runtime_allocator, quoted_expr, ast.makeNil());
+                break :res try ast.makeCons(self.runtime_allocator, quote_symbol, args);
+            },
 
             .r_paren => ParserError.MissingOpeningParenthesis,
             .eof => ParserError.ExpectedEof,
@@ -83,8 +93,8 @@ pub const Parser = struct {
     fn parseList(self: *Parser) !AstNode {
         var nodes: std.ArrayList(AstNode) = .empty;
         errdefer {
-            for (nodes.items) |item| item.deinit(self.allocator);
-            nodes.deinit(self.allocator);
+            for (nodes.items) |item| item.deinit(self.runtime_allocator);
+            nodes.deinit(self.runtime_allocator);
         }
 
         while (true) {
@@ -98,12 +108,12 @@ pub const Parser = struct {
                 .eof => return ParserError.MissingClosingParenthesis,
                 else => {
                     const item = try self.parse(.{});
-                    try nodes.append(self.allocator, item);
+                    try nodes.append(self.runtime_allocator, item);
                 },
             }
         }
 
-        defer nodes.deinit(self.allocator);
+        defer nodes.deinit(self.runtime_allocator);
 
         var current_tail = ast.makeNil();
 
@@ -112,7 +122,7 @@ pub const Parser = struct {
             while (i > 0) {
                 i -= 1;
                 const head_element = nodes.items[i];
-                current_tail = try ast.makeCons(self.allocator, head_element, current_tail);
+                current_tail = try ast.makeCons(self.runtime_allocator, head_element, current_tail);
             }
         }
         return current_tail;
