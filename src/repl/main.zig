@@ -29,7 +29,8 @@ pub fn main(init: std.process.Init) !void {
     var stdin_file_reader: Io.File.Reader = .init(.stdout(), io, &stdin_buffer);
     const stdin_reader = &stdin_file_reader.interface;
 
-    try isocline.set_history(allocator, ".liscript_history", 2048);
+    try isocline.setHistory(allocator, ".liscript_history", 2048);
+    isocline.highlight.enableLispHighlight();
 
     var iter_arena = std.heap.ArenaAllocator.init(allocator);
     defer iter_arena.deinit();
