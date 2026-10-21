@@ -51,7 +51,14 @@ pub const Lexer = struct {
                 self.skipComment();
                 return try self.nextToken();
             },
-            // '-' => return try self.readNumber(),
+            '-' => {
+                if (self.peekNextChar()) |next_char| switch (next_char) {
+                    '0'...'9' => return try self.readNumber(),
+                    else => return try self.readIdentifier(),
+                };
+
+                return try self.readIdentifier();
+            },
             '0'...'9' => return try self.readNumber(),
             '@' => return try self.readQuotedSymbol(),
             '(' => {
@@ -126,6 +133,11 @@ pub const Lexer = struct {
     fn peekChar(self: Lexer) ?u8 {
         if (self.cursor >= self.source.len) return null;
         return self.source[self.cursor];
+    }
+
+    fn peekNextChar(self: Lexer) ?u8 {
+        if (self.cursor + 1 >= self.source.len) return null;
+        return self.source[self.cursor + 1];
     }
 
     fn readString(self: *Lexer) !Token {
