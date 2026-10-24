@@ -15,6 +15,7 @@ pub const Lexer = lexer.Lexer;
 pub const Parser = @import("parser.zig").Parser;
 pub const Environment = environment.Environment;
 pub const Evaluator = @import("evaluator.zig").Evaluator;
+pub const EvaluatorContext = @import("evaluator/context.zig").EvaluatorContext;
 
 pub fn evaluate(command: []const u8) []const u8 {
     return command;

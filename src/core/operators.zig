@@ -45,7 +45,8 @@ pub const Add = struct {
 
     symbol: Symbol,
 
-    pub fn init(symbol_table: *SymbolTable) !Add {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Add {
+        _ = allocator;
         const symbol = try symbol_table.insert(Add.repr);
         return .{ .symbol = symbol };
     }
@@ -81,7 +82,8 @@ pub const Sub = struct {
 
     symbol: Symbol,
 
-    pub fn init(symbol_table: *SymbolTable) !Sub {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Sub {
+        _ = allocator;
         const symbol = try symbol_table.insert(Sub.repr);
         return .{ .symbol = symbol };
     }
@@ -117,7 +119,8 @@ pub const Mul = struct {
 
     symbol: Symbol,
 
-    pub fn init(symbol_table: *SymbolTable) !Mul {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Mul {
+        _ = allocator;
         const symbol = try symbol_table.insert(Mul.repr);
         return .{ .symbol = symbol };
     }
@@ -153,7 +156,8 @@ pub const Div = struct {
 
     symbol: Symbol,
 
-    pub fn init(symbol_table: *SymbolTable) !Div {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Div {
+        _ = allocator;
         const symbol = try symbol_table.insert(Div.repr);
         return .{ .symbol = symbol };
     }
@@ -201,7 +205,8 @@ pub const Mod = struct {
 
     symbol: Symbol,
 
-    pub fn init(symbol_table: *SymbolTable) !Mod {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Mod {
+        _ = allocator;
         const symbol = try symbol_table.insert(Mod.repr);
         return .{ .symbol = symbol };
     }

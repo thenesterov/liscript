@@ -11,6 +11,7 @@ const EnvironmentError = environment.EnvironmentError;
 const Operator = @import("operators.zig").Operator;
 const Predicate = @import("predicates.zig").Predicate;
 const ListIter = @import("list_iter.zig").ListIterator;
+const EvaluatorContext = @import("evaluator/context.zig").EvaluatorContext;
 
 pub const EvaluatorError = error{
     CantCallLiteral,
@@ -28,8 +29,13 @@ pub const Evaluator = struct {
     writer: *std.Io.Writer,
     reader: *std.Io.Reader,
 
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable, writer: *std.Io.Writer, reader: *std.Io.Reader) Evaluator {
-        return .{ .allocator = allocator, .symbol_table = symbol_table, .writer = writer, .reader = reader };
+    pub fn init(context: *EvaluatorContext) Evaluator {
+        return .{
+            .allocator = context.runtime_allocator,
+            .symbol_table = &context.symbol_table,
+            .writer = context.io.writer(),
+            .reader = context.io.reader(),
+        };
     }
 
     pub fn evaluate(self: Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {

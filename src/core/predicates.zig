@@ -25,7 +25,8 @@ pub const Equal = struct {
 
     symbol: Symbol,
 
-    pub fn init(symbol_table: *SymbolTable) !Equal {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Equal {
+        _ = allocator;
         const symbol = try symbol_table.insert(Equal.repr);
         return .{ .symbol = symbol };
     }
@@ -102,7 +103,8 @@ pub const GreaterThan = struct {
 
     symbol: Symbol,
 
-    pub fn init(symbol_table: *SymbolTable) !GreaterThan {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !GreaterThan {
+        _ = allocator;
         const symbol = try symbol_table.insert(GreaterThan.repr);
         return .{ .symbol = symbol };
     }
@@ -141,7 +143,8 @@ pub const GreaterThanEqual = struct {
 
     symbol: Symbol,
 
-    pub fn init(symbol_table: *SymbolTable) !GreaterThanEqual {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !GreaterThanEqual {
+        _ = allocator;
         const symbol = try symbol_table.insert(GreaterThanEqual.repr);
         return .{ .symbol = symbol };
     }
@@ -180,7 +183,8 @@ pub const LessThan = struct {
 
     symbol: Symbol,
 
-    pub fn init(symbol_table: *SymbolTable) !LessThan {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !LessThan {
+        _ = allocator;
         const symbol = try symbol_table.insert(LessThan.repr);
         return .{ .symbol = symbol };
     }
@@ -219,7 +223,8 @@ pub const LessThanEqual = struct {
 
     symbol: Symbol,
 
-    pub fn init(symbol_table: *SymbolTable) !LessThanEqual {
+    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !LessThanEqual {
+        _ = allocator;
         const symbol = try symbol_table.insert(LessThanEqual.repr);
         return .{ .symbol = symbol };
     }
