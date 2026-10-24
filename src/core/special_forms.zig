@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const ast = @import("ast.zig");
+const args_unpacker = @import("args_unpacker.zig");
 
 const SymbolTable = @import("symbol_table.zig").SymbolTable;
 const Environment = @import("environment.zig").Environment;
@@ -37,11 +38,13 @@ pub fn MakeSpecialForm(comptime name: []const u8, comptime body_fn: anytype) typ
         pub const repr = name;
         symbol: SymbolNode,
         allocator: std.mem.Allocator,
+        symbol_table: *SymbolTable,
 
         pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !@This() {
             return .{
                 .symbol = try symbol_table.insert(@This().repr),
                 .allocator = allocator,
+                .symbol_table = symbol_table,
             };
         }
 
@@ -61,261 +64,180 @@ pub fn MakeSpecialForm(comptime name: []const u8, comptime body_fn: anytype) typ
 }
 
 pub const Quote = MakeSpecialForm("quote", struct {
-    fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "arg", .mask = args_unpacker.ArgType.any },
+    };
+
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
         _ = environment;
         _ = evaluator;
 
-        var iter = ListIter.init(body);
+        const shape = try args_unpacker.unpack(spec, "quote", body);
 
-        if (iter.next(.cons)) |arg| return arg;
-
-        return SpecialFormError.ArgsIsRequired;
+        return shape.get("arg");
     }
 }.exec);
 
-pub const TypeOf = struct {
-    pub const repr = "typeof";
+pub const TypeOf = MakeSpecialForm("typeof", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "arg", .mask = args_unpacker.ArgType.any },
+    };
 
-    symbol: SymbolNode,
-    allocator: std.mem.Allocator,
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
 
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !TypeOf {
-        const symbol = try symbol_table.insert(TypeOf.repr);
-        return .{ .symbol = symbol, .allocator = allocator };
-    }
+        const shape = try args_unpacker.unpack(spec, "typeof", body);
 
-    pub fn specialForm(self: *const TypeOf) SpecialForm {
-        return .{ .ptr = self, .repr = TypeOf.repr, .exec_fn = TypeOf.exec };
-    }
+        const arg = shape.get("arg");
+        const evaluated_arg = try evaluator.evaluate(arg, environment);
 
-    pub inline fn register(self: TypeOf, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
-
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
-        const self: *const TypeOf = @ptrCast(@alignCast(ptr));
-
-        const args = try ast.unwrapCons(body);
-        const arg = try evaluator.evaluate(args.car, environment);
-
-        const type_str = switch (arg) {
-            .object => if (ast.isCons(arg) != null) "list" else "string",
+        const type_str = switch (evaluated_arg) {
+            .object => if (ast.isCons(evaluated_arg) != null) "list" else "string",
             else => |node| @tagName(node),
         };
 
         return ast.makeString(self.allocator, type_str);
     }
-};
+}.exec);
 
-pub const Cons = struct {
-    pub const repr = "cons";
+pub const Cons = MakeSpecialForm("cons", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "car", .mask = args_unpacker.ArgType.any },
+        .{ .name = "cdr", .mask = args_unpacker.ArgType.list },
+    };
 
-    symbol: SymbolNode,
-    allocator: std.mem.Allocator,
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
 
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Cons {
-        const symbol = try symbol_table.insert(Cons.repr);
-        return .{ .symbol = symbol, .allocator = allocator };
+        const shape = try args_unpacker.unpack(spec, "cons", body);
+
+        const car = shape.get("car");
+        const evaluated_car = try evaluator.evaluate(car, environment);
+
+        const cdr = shape.get("cdr");
+        const evaluated_cdr = try evaluator.evaluate(cdr, environment);
+
+        return ast.makeCons(self.allocator, evaluated_car, evaluated_cdr);
     }
+}.exec);
 
-    pub fn specialForm(self: *const Cons) SpecialForm {
-        return .{ .ptr = self, .repr = Cons.repr, .exec_fn = Cons.exec };
+pub const Car = MakeSpecialForm("car", struct {
+    const unevaluatede_spec = [_]args_unpacker.Arg{
+        .{ .name = "unevaluated_arg", .mask = args_unpacker.ArgType.any },
+    };
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "arg", .mask = args_unpacker.ArgType.list },
+    };
+
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
+
+        const unevaluated_shape = try args_unpacker.unpack(unevaluatede_spec, "car", body);
+        const evaluated_arg = try evaluator.evaluate(unevaluated_shape.get("unevaluated_arg"), environment);
+
+        const wrapped_arg = try ast.makeCons(self.allocator, evaluated_arg, ast.makeNil());
+
+        const shape = try args_unpacker.unpack(spec, "car", wrapped_arg);
+
+        const boxed_list = shape.get("arg");
+        return switch (boxed_list) {
+            .nil => ast.makeNil(),
+            .object => res: {
+                const cons = ast.unwrapCons(boxed_list) catch unreachable;
+                break :res cons.car;
+            },
+            else => unreachable,
+        };
     }
+}.exec);
 
-    pub inline fn register(self: Cons, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
+pub const Cdr = MakeSpecialForm("cdr", struct {
+    const unevaluatede_spec = [_]args_unpacker.Arg{
+        .{ .name = "unevaluated_arg", .mask = args_unpacker.ArgType.any },
+    };
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "arg", .mask = args_unpacker.ArgType.list },
+    };
+
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
+
+        const unevaluated_shape = try args_unpacker.unpack(unevaluatede_spec, "cdr", body);
+        const evaluated_arg = try evaluator.evaluate(unevaluated_shape.get("unevaluated_arg"), environment);
+
+        const wrapped_arg = try ast.makeCons(self.allocator, evaluated_arg, ast.makeNil());
+
+        const shape = try args_unpacker.unpack(spec, "cdr", wrapped_arg);
+
+        const boxed_list = shape.get("arg");
+        return switch (boxed_list) {
+            .nil => ast.makeNil(),
+            .object => res: {
+                const cons = ast.unwrapCons(boxed_list) catch unreachable;
+                break :res cons.cdr;
+            },
+            else => unreachable,
+        };
     }
+}.exec);
 
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
-        const self: *const Cons = @ptrCast(@alignCast(ptr));
+pub const Write = MakeSpecialForm("write", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "args", .mask = args_unpacker.ArgType.any, .is_rest = true },
+    };
 
-        const args = try ast.unwrapCons(body);
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
 
-        const car = args.car;
+        const shape = try args_unpacker.unpack(spec, "write", body);
 
-        const rest_cons = try ast.unwrapCons(args.cdr);
-        const cdr = ast.isConsNode(rest_cons.car) orelse return SpecialFormError.CdrIsNotList;
+        var args_iter = ListIter.init(shape.get("args"));
 
-        return ast.makeCons(self.allocator, try evaluator.evaluate(car, environment), try evaluator.evaluate(cdr, environment));
-    }
-};
+        while (args_iter.next(.any)) |node| {
+            const evaluated_node = try evaluator.evaluate(node, environment);
 
-pub const Car = struct {
-    pub const repr = "car";
-
-    symbol: SymbolNode,
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Car {
-        const symbol = try symbol_table.insert(Car.repr);
-        return .{ .symbol = symbol, .allocator = allocator };
-    }
-
-    pub fn specialForm(self: *const Car) SpecialForm {
-        return .{ .ptr = self, .repr = Car.repr, .exec_fn = Car.exec };
-    }
-
-    pub inline fn register(self: Car, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
-
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
-        _ = ptr;
-
-        const args = try ast.unwrapCons(body);
-        const arg = ast.isConsNode(args.car) orelse return SpecialFormError.ArgIsNotList;
-
-        const evaluated_arg = try evaluator.evaluate(arg, environment);
-        const list = try ast.unwrapCons(evaluated_arg);
-
-        return list.car;
-    }
-};
-
-pub const Cdr = struct {
-    pub const repr = "cdr";
-
-    symbol: SymbolNode,
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Cdr {
-        const symbol = try symbol_table.insert(Cdr.repr);
-        return .{ .symbol = symbol, .allocator = allocator };
-    }
-
-    pub fn specialForm(self: *const Cdr) SpecialForm {
-        return .{ .ptr = self, .repr = Cdr.repr, .exec_fn = Cdr.exec };
-    }
-
-    pub inline fn register(self: Cdr, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
-
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
-        _ = ptr;
-
-        const args = try ast.unwrapCons(body);
-        const arg = ast.isConsNode(args.car) orelse return SpecialFormError.ArgIsNotList;
-
-        const evaluated_arg = try evaluator.evaluate(arg, environment);
-        const list = try ast.unwrapCons(evaluated_arg);
-
-        return list.cdr;
-    }
-};
-
-pub const Write = struct {
-    pub const repr = "write";
-
-    symbol: SymbolNode,
-    symbol_table: *SymbolTable,
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Write {
-        const symbol = try symbol_table.insert(Write.repr);
-        return .{ .symbol = symbol, .symbol_table = symbol_table, .allocator = allocator };
-    }
-
-    pub fn specialForm(self: *const Write) SpecialForm {
-        return .{ .ptr = self, .repr = Write.repr, .exec_fn = Write.exec };
-    }
-
-    pub inline fn register(self: Write, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
-
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
-        const self: *const Write = @ptrCast(@alignCast(ptr));
-
-        if (ast.isNil(body) != null) {
-            return SpecialFormError.ArgsIsRequired;
-        }
-
-        const args = try ast.unwrapCons(body);
-
-        var arg_1 = try evaluator.evaluate(args.car, environment);
-        var rest_args = args.cdr;
-
-        if (ast.isString(arg_1)) |string| {
-            _ = try evaluator.writer.write(string);
-        } else {
-            try arg_1.repr(self.symbol_table.*, evaluator.writer);
-        }
-
-        while (ast.isNil(rest_args) == null) {
-            const rest_cons = try ast.unwrapCons(rest_args);
-            const arg_2 = try evaluator.evaluate(rest_cons.car, environment);
-
-            _ = try evaluator.writer.write(" ");
-
-            if (ast.isString(arg_2)) |string| {
-                _ = try evaluator.writer.write(string);
+            if (ast.isString(evaluated_node)) |string| {
+                try evaluator.writer.print("{s}", .{string});
             } else {
-                try arg_2.repr(self.symbol_table.*, evaluator.writer);
+                try evaluated_node.repr(self.symbol_table.*, evaluator.writer);
             }
-
-            rest_args = rest_cons.cdr;
         }
 
         try evaluator.writer.flush();
 
         return ast.makeNil();
     }
-};
+}.exec);
 
-pub const Print = struct {
-    pub const repr = "print";
+pub const Print = MakeSpecialForm("print", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "args", .mask = args_unpacker.ArgType.any, .is_rest = true },
+    };
 
-    symbol: SymbolNode,
-    symbol_table: *SymbolTable,
-    allocator: std.mem.Allocator,
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
 
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Print {
-        const symbol = try symbol_table.insert(Print.repr);
-        return .{ .symbol = symbol, .symbol_table = symbol_table, .allocator = allocator };
-    }
+        const shape = try args_unpacker.unpack(spec, "print", body);
 
-    pub fn specialForm(self: *const Print) SpecialForm {
-        return .{ .ptr = self, .repr = Print.repr, .exec_fn = Print.exec };
-    }
+        var args_iter = ListIter.init(shape.get("args"));
 
-    pub inline fn register(self: Print, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
+        while (args_iter.next(.any)) |node| {
+            const evaluated_node = try evaluator.evaluate(node, environment);
 
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
-        const self: *const Print = @ptrCast(@alignCast(ptr));
-
-        if (ast.isNil(body) != null) {
-            return SpecialFormError.ArgsIsRequired;
-        }
-
-        const args = try ast.unwrapCons(body);
-
-        var arg_1 = try evaluator.evaluate(args.car, environment);
-        var rest_args = args.cdr;
-
-        if (ast.isString(arg_1)) |string| {
-            _ = try evaluator.writer.write(string);
-        } else {
-            try arg_1.repr(self.symbol_table.*, evaluator.writer);
-        }
-
-        while (ast.isNil(rest_args) == null) {
-            const rest_cons = try ast.unwrapCons(rest_args);
-            const arg_2 = try evaluator.evaluate(rest_cons.car, environment);
-
-            _ = try evaluator.writer.write(" ");
-
-            if (ast.isString(arg_2)) |string| {
-                _ = try evaluator.writer.write(string);
+            if (ast.isString(evaluated_node)) |string| {
+                try evaluator.writer.print("{s} ", .{string});
             } else {
-                try arg_2.repr(self.symbol_table.*, evaluator.writer);
+                try evaluated_node.repr(self.symbol_table.*, evaluator.writer);
+                _ = try evaluator.writer.write(" ");
             }
-
-            rest_args = rest_cons.cdr;
         }
 
         _ = try evaluator.writer.write("\n");
@@ -323,39 +245,22 @@ pub const Print = struct {
 
         return ast.makeNil();
     }
-};
+}.exec);
 
-pub const Input = struct {
-    pub const repr = "input";
+pub const Input = MakeSpecialForm("input", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "prompt", .mask = args_unpacker.ArgType.string },
+    };
 
-    symbol: SymbolNode,
-    symbol_table: *SymbolTable,
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Input {
-        const symbol = try symbol_table.insert(Input.repr);
-        return .{ .symbol = symbol, .symbol_table = symbol_table, .allocator = allocator };
-    }
-
-    pub fn specialForm(self: *const Input) SpecialForm {
-        return .{ .ptr = self, .repr = Input.repr, .exec_fn = Input.exec };
-    }
-
-    pub inline fn register(self: Input, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
-
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
         _ = environment;
 
-        const self: *const Input = @ptrCast(@alignCast(ptr));
+        const shape = try args_unpacker.unpack(spec, "input", body);
 
-        var prompt: []const u8 = "";
-
-        if (ast.isNil(body) == null) {
-            const args = ast.isCons(body) orelse return SpecialFormError.CdrIsNotList;
-            prompt = try ast.unwrapString(args.car);
-        }
+        const boxed_prompt = shape.get("prompt");
+        const prompt = ast.unwrapString(boxed_prompt) catch unreachable;
 
         _ = try evaluator.writer.write(prompt);
         try evaluator.writer.flush();
@@ -365,39 +270,22 @@ pub const Input = struct {
 
         return ast.makeString(self.allocator, input);
     }
-};
+}.exec);
 
-pub const Read = struct {
-    pub const repr = "read";
+pub const Read = MakeSpecialForm("read", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "prompt", .mask = args_unpacker.ArgType.string },
+    };
 
-    symbol: SymbolNode,
-    symbol_table: *SymbolTable,
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Read {
-        const symbol = try symbol_table.insert(Read.repr);
-        return .{ .symbol = symbol, .symbol_table = symbol_table, .allocator = allocator };
-    }
-
-    pub fn specialForm(self: *const Read) SpecialForm {
-        return .{ .ptr = self, .repr = Read.repr, .exec_fn = Read.exec };
-    }
-
-    pub inline fn register(self: Read, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
-
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
         _ = environment;
 
-        const self: *const Read = @ptrCast(@alignCast(ptr));
+        const shape = try args_unpacker.unpack(spec, "read", body);
 
-        var prompt: []const u8 = "";
-
-        if (ast.isNil(body) == null) {
-            const args = ast.isCons(body) orelse return SpecialFormError.CdrIsNotList;
-            prompt = try ast.unwrapString(args.car);
-        }
+        const boxed_prompt = shape.get("prompt");
+        const prompt = ast.unwrapString(boxed_prompt) catch unreachable;
 
         _ = try evaluator.writer.write(prompt);
         try evaluator.writer.flush();
@@ -410,44 +298,27 @@ pub const Read = struct {
 
         return parser.parse(.{ .check_dungling_tokens = true });
     }
-};
+}.exec);
 
-pub const Symbol = struct {
-    pub const repr = "symbol";
+pub const Symbol = MakeSpecialForm("symbol", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "arg", .mask = args_unpacker.ArgType.string },
+    };
 
-    symbol: SymbolNode,
-    symbol_table: *SymbolTable,
-    allocator: std.mem.Allocator,
-
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Symbol {
-        const symbol = try symbol_table.insert(Symbol.repr);
-        return .{ .symbol = symbol, .symbol_table = symbol_table, .allocator = allocator };
-    }
-
-    pub fn specialForm(self: *const Symbol) SpecialForm {
-        return .{ .ptr = self, .repr = Symbol.repr, .exec_fn = Symbol.exec };
-    }
-
-    pub inline fn register(self: Symbol, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
-
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
         _ = environment;
         _ = evaluator;
 
-        const self: *const Symbol = @ptrCast(@alignCast(ptr));
+        const shape = try args_unpacker.unpack(spec, "symbol", body);
 
-        if (ast.isNil(body) != null) {
-            return SpecialFormError.ArgsIsRequired;
-        }
-
-        const args = try ast.unwrapCons(body);
-        const arg = try ast.unwrapString(args.car);
+        const boxed_arg = shape.get("arg");
+        const arg = ast.unwrapString(boxed_arg) catch unreachable;
 
         return ast.makeSymbol(try self.symbol_table.insert(arg));
     }
-};
+}.exec);
 
 pub const Do = MakeSpecialForm("do", struct {
     fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
@@ -465,238 +336,177 @@ pub const Do = MakeSpecialForm("do", struct {
     }
 }.exec);
 
-pub const Cond = struct {
-    pub const repr = "cond";
+pub const Cond = MakeSpecialForm("cond", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "clauses", .mask = args_unpacker.ArgType.any, .is_rest = true },
+    };
 
-    symbol: SymbolNode,
-    symbol_table: *SymbolTable,
-    allocator: std.mem.Allocator,
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
 
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Cond {
-        const symbol = try symbol_table.insert(Cond.repr);
-        return .{ .symbol = symbol, .symbol_table = symbol_table, .allocator = allocator };
-    }
+        const shape = try args_unpacker.unpack(spec, "cond", body);
 
-    pub fn specialForm(self: *const Cond) SpecialForm {
-        return .{ .ptr = self, .repr = Cond.repr, .exec_fn = Cond.exec };
-    }
+        var iter = ListIter.init(shape.get("clauses"));
 
-    pub inline fn register(self: Cond, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
+        while (iter.current != .nil) {
+            const cond_expr = iter.next(.any).?;
 
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
-        _ = ptr;
-
-        if (ast.isNil(body) != null) {
-            return ast.makeNil();
-        }
-
-        const args = try ast.unwrapCons(body);
-
-        var condition_or_value = try evaluator.evaluate(args.car, environment);
-        var rest_args = args.cdr;
-
-        while (ast.isNil(rest_args) == null) {
-            const rest_cons = try ast.unwrapCons(rest_args);
-
-            const condition = try ast.unwrapBool(condition_or_value);
-            if (condition.get()) {
-                return try evaluator.evaluate(rest_cons.car, environment);
+            if (iter.current == .nil) {
+                return try evaluator.evaluate(cond_expr, environment);
             }
 
-            const else_ = try ast.unwrapCons(rest_cons.cdr);
-            condition_or_value = try evaluator.evaluate(else_.car, environment);
-            rest_args = else_.cdr;
+            const then_expr = iter.next(.any).?;
+
+            const evaluated_cond = try evaluator.evaluate(cond_expr, environment);
+
+            if (ast.isBoolean(evaluated_cond)) |boolean| {
+                if (boolean.get()) {
+                    return try evaluator.evaluate(then_expr, environment);
+                }
+            }
         }
 
-        return condition_or_value;
+        return ast.makeNil();
     }
-};
+}.exec);
 
-pub const Eval = struct {
-    pub const repr = "eval";
+pub const Eval = MakeSpecialForm("eval", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "arg", .mask = args_unpacker.ArgType.any },
+    };
 
-    symbol: SymbolNode,
-    symbol_table: *SymbolTable,
-    allocator: std.mem.Allocator,
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
 
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Eval {
-        const symbol = try symbol_table.insert(Eval.repr);
-        return .{ .symbol = symbol, .symbol_table = symbol_table, .allocator = allocator };
-    }
+        const shape = try args_unpacker.unpack(spec, "eval", body);
 
-    pub fn specialForm(self: *const Eval) SpecialForm {
-        return .{ .ptr = self, .repr = Eval.repr, .exec_fn = Eval.exec };
-    }
+        const arg = shape.get("arg");
 
-    pub inline fn register(self: Eval, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
-
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
-        const self: *const Eval = @ptrCast(@alignCast(ptr));
-        _ = self;
-
-        if (ast.isNil(body) != null) return ast.makeNil();
-
-        const args = try ast.unwrapCons(body);
-        const evaluated_arg = try evaluator.evaluate(args.car, environment);
-
+        const evaluated_arg = try evaluator.evaluate(arg, environment);
         return try evaluator.evaluate(evaluated_arg, environment);
     }
-};
+}.exec);
 
-pub const Def = struct {
-    pub const repr = "def";
+pub const Def = MakeSpecialForm("def", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "args", .mask = args_unpacker.ArgType.any, .is_rest = true, .require_even = true },
+    };
 
-    symbol: SymbolNode,
-    symbol_table: *SymbolTable,
-    allocator: std.mem.Allocator,
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
 
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Def {
-        const symbol = try symbol_table.insert(Def.repr);
-        return .{ .symbol = symbol, .symbol_table = symbol_table, .allocator = allocator };
-    }
+        const shape = try args_unpacker.unpack(spec, "def", body);
+        const args = shape.get("args");
 
-    pub fn specialForm(self: *const Def) SpecialForm {
-        return .{ .ptr = self, .repr = Def.repr, .exec_fn = Def.exec };
-    }
+        if (ast.isNil(body) != null) return error.TooFewArguments;
 
-    pub inline fn register(self: Def, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
+        var iter = ListIter.init(args);
 
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
-        if (ast.isNil(body) != null) {
-            return SpecialFormError.ArgsIsRequired;
-        }
+        while (iter.current != .nil) {
+            const boxed_symbol = iter.next(.symbol) orelse return error.ArgShouldBeSymbol; // TODO
+            const boxed_value = iter.next(.any).?;
 
-        const symbol_defintion_cons = try ast.unwrapCons(body);
-        const var_name = try ast.unwrapSymbol(symbol_defintion_cons.car);
-        const var_value_node = symbol_defintion_cons.cdr;
+            const symbol = try ast.unwrapSymbol(boxed_symbol);
+            const value = try evaluator.evaluate(boxed_value, environment);
 
-        if (ast.isNil(var_value_node) != null) {
-            return SpecialFormError.ArgsIsRequired; // todo
-        }
-
-        const var_value_cons = try ast.unwrapCons(var_value_node);
-        const var_value_evaluated = try evaluator.evaluate(var_value_cons.car, environment);
-
-        try environment.def(var_name, var_value_evaluated);
-
-        if (ast.isNil(var_value_cons.cdr) == null) {
-            return Def.exec(ptr, environment, evaluator, var_value_cons.cdr);
+            try environment.def(symbol, value);
         }
 
         return ast.makeNil();
     }
-};
+}.exec);
 
-pub const Set = struct {
-    pub const repr = "set!";
+pub const Set = MakeSpecialForm("set!", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "args", .mask = args_unpacker.ArgType.any, .is_rest = true, .require_even = true },
+    };
 
-    symbol: SymbolNode,
-    symbol_table: *SymbolTable,
-    allocator: std.mem.Allocator,
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
 
-    pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !Set {
-        const symbol = try symbol_table.insert(Set.repr);
-        return .{ .symbol = symbol, .symbol_table = symbol_table, .allocator = allocator };
-    }
+        const shape = try args_unpacker.unpack(spec, "set!", body);
+        const args = shape.get("args");
 
-    pub fn specialForm(self: *const Set) SpecialForm {
-        return .{ .ptr = self, .repr = Set.repr, .exec_fn = Set.exec };
-    }
+        if (ast.isNil(body) != null) return error.TooFewArguments;
 
-    pub inline fn register(self: Set, environment: *Environment) !void {
-        try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
-    }
+        var iter = ListIter.init(args);
 
-    pub fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
-        if (ast.isNil(body) != null) {
-            return SpecialFormError.ArgsIsRequired;
-        }
+        while (iter.current != .nil) {
+            const boxed_symbol = iter.next(.symbol) orelse return error.ArgShouldBeSymbol; // TODO
+            const boxed_value = iter.next(.any).?;
 
-        const symbol_defintion_cons = try ast.unwrapCons(body);
-        const var_name = try ast.unwrapSymbol(symbol_defintion_cons.car);
-        const var_value_node = symbol_defintion_cons.cdr;
+            const symbol = try ast.unwrapSymbol(boxed_symbol);
+            const value = try evaluator.evaluate(boxed_value, environment);
 
-        if (ast.isNil(var_value_node) != null) {
-            return SpecialFormError.ArgsIsRequired; // todo
-        }
-
-        const var_value_cons = try ast.unwrapCons(var_value_node);
-        const var_value_evaluated = try evaluator.evaluate(var_value_cons.car, environment);
-
-        try environment.set(var_name, var_value_evaluated);
-
-        if (ast.isNil(var_value_cons.cdr) == null) {
-            return Set.exec(ptr, environment, evaluator, var_value_cons.cdr);
+            try environment.set(symbol, value);
         }
 
         return ast.makeNil();
     }
-};
+}.exec);
 
 pub const Lambda = MakeSpecialForm("lambda", struct {
-    fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "args", .mask = args_unpacker.ArgType.list },
+        .{ .name = "body", .mask = args_unpacker.ArgType.any },
+    };
+
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
         _ = evaluator;
 
-        const this = @as(@TypeOf(self), self);
+        const shape = try args_unpacker.unpack(spec, "lambda", body);
 
-        var iter = ListIter.init(body);
+        const args = shape.get("args");
+        const body_ = shape.get("body");
 
-        if (iter.next(.cons) orelse iter.next(.nil)) |args| {
-            if (iter.next(.any)) |body_| {
-                return try ast.makeLambda(this.allocator, args, body_, environment);
-            }
-
-            return SpecialFormError.LambdaBodyCantBeEmpty;
-        }
-
-        return SpecialFormError.LambdaArgsMustBeList;
+        return try ast.makeLambda(self.allocator, args, body_, environment);
     }
 }.exec);
 
 pub const Dambda = MakeSpecialForm("dambda", struct {
-    fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "args", .mask = args_unpacker.ArgType.list },
+        .{ .name = "body", .mask = args_unpacker.ArgType.any },
+    };
+
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
         _ = environment;
         _ = evaluator;
 
-        const this = @as(@TypeOf(self), self);
+        const shape = try args_unpacker.unpack(spec, "dambda", body);
 
-        var iter = ListIter.init(body);
+        const args = shape.get("args");
+        const body_ = shape.get("body");
 
-        if (iter.next(.cons) orelse iter.next(.nil)) |args| {
-            if (iter.next(.any)) |body_| {
-                return try ast.makeDambda(this.allocator, args, body_);
-            }
-
-            return SpecialFormError.DambdaBodyCantBeEmpty;
-        }
-
-        return SpecialFormError.DambdaArgsMustBeList;
+        return try ast.makeDambda(self.allocator, args, body_);
     }
 }.exec);
 
 pub const Macro = MakeSpecialForm("macro", struct {
-    fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "args", .mask = args_unpacker.ArgType.list },
+        .{ .name = "body", .mask = args_unpacker.ArgType.any },
+    };
+
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
         _ = environment;
         _ = evaluator;
 
-        const this = @as(@TypeOf(self), self);
+        const shape = try args_unpacker.unpack(spec, "dambda", body);
 
-        var iter = ListIter.init(body);
+        const args = shape.get("args");
+        const body_ = shape.get("body");
 
-        if (iter.next(.cons) orelse iter.next(.nil)) |args| {
-            if (iter.next(.any)) |body_| {
-                return try ast.makeMacro(this.allocator, args, body_);
-            }
-
-            return SpecialFormError.MacroBodyCantBeEmpty;
-        }
-
-        return SpecialFormError.MacroArgsMustBeList;
+        return try ast.makeMacro(self.allocator, args, body_);
     }
 }.exec);

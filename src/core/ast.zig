@@ -338,6 +338,34 @@ pub fn makeMacro(allocator: std.mem.Allocator, args: AstNode, body: AstNode) !As
     return AstNode{ .object = ObjectPtr.fromPtr(obj) };
 }
 
+pub fn isInteger(node: AstNode) ?Int {
+    return switch (node) {
+        .int => |int| int,
+        else => null,
+    };
+}
+
+pub fn isFloat(node: AstNode) ?Float {
+    return switch (node) {
+        .float => |float| float,
+        else => null,
+    };
+}
+
+pub fn isSymbol(node: AstNode) ?Symbol {
+    return switch (node) {
+        .symbol => |symbol| symbol,
+        else => null,
+    };
+}
+
+pub fn isBoolean(node: AstNode) ?Bool {
+    return switch (node) {
+        .bool => |boolean| boolean,
+        else => null,
+    };
+}
+
 pub fn isNil(node: AstNode) ?Nil {
     return switch (node) {
         .nil => |nil| nil,
