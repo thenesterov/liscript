@@ -10,7 +10,7 @@ const Environment = environment.Environment;
 const EnvironmentError = environment.EnvironmentError;
 const Operator = @import("operators.zig").Operator;
 const Predicate = @import("predicates.zig").Predicate;
-const ListIter = @import("list_iter.zig").ListIterator;
+const ListIter = @import("helpers/list_iter.zig").ListIterator;
 const EvaluatorContext = @import("evaluator/context.zig").EvaluatorContext;
 
 pub const EvaluatorError = error{
