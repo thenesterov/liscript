@@ -2,11 +2,12 @@ const std = @import("std");
 
 const str = @import("str");
 
-const Operator = @import("operators.zig").Operator;
-const Predicate = @import("predicates.zig").Predicate;
-const SpecialForm = @import("special_forms.zig").SpecialForm;
-const Environment = @import("environment.zig").Environment;
-const SymbolTable = @import("symbol_table.zig").SymbolTable;
+const helpers = @import("helpers.zig");
+const Operator = @import("../operators.zig").Operator;
+const Predicate = @import("../predicates.zig").Predicate;
+const SpecialForm = @import("../special_forms.zig").SpecialForm;
+const Environment = @import("../environment.zig").Environment;
+const SymbolTable = @import("../symbol_table.zig").SymbolTable;
 
 pub const Float = packed struct {
     bits: u64,
@@ -156,7 +157,7 @@ pub const Lambda = struct {
     pub fn repr(self: Lambda, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
         try writer.print("(lambda ", .{});
 
-        if (as(.nil, self.args)) |_| {
+        if (helpers.as(.nil, self.args)) |_| {
             try writer.print("()", .{});
         } else {
             try self.args.repr(symbol_table, writer);
@@ -174,7 +175,7 @@ pub const Dambda = struct {
     pub fn repr(self: Dambda, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
         try writer.print("(dambda ", .{});
 
-        if (as(.nil, self.args)) |_| {
+        if (helpers.as(.nil, self.args)) |_| {
             try writer.print("()", .{});
         } else {
             try self.args.repr(symbol_table, writer);
@@ -192,7 +193,7 @@ pub const Macro = struct {
     pub fn repr(self: Macro, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
         try writer.print("(macro ", .{});
 
-        if (as(.nil, self.args)) |_| {
+        if (helpers.as(.nil, self.args)) |_| {
             try writer.print("()", .{});
         } else {
             try self.args.repr(symbol_table, writer);
@@ -274,108 +275,3 @@ pub const AstNode = union(enum) {
         }
     }
 };
-
-fn RawType(comptime tag: std.meta.Tag(AstNode)) type {
-    return switch (tag) {
-        .float => f64,
-        .int => i32,
-        .nil => void,
-        .bool => bool,
-        .symbol => Symbol,
-        .object => @compileError("use makeObject for .object"),
-        else => @compileError("can't make .builtin"),
-    };
-}
-
-pub fn make(
-    comptime tag: std.meta.Tag(AstNode),
-    value: RawType(tag),
-) AstNode {
-    return switch (tag) {
-        .int => .{ .int = Int.from(value) },
-        .float => .{ .float = Float.from(value) },
-        .bool => .{ .bool = Bool.from(value) },
-        .symbol => .{ .symbol = value },
-        .nil => .{ .nil = Nil.from() },
-        .object => unreachable,
-        .builtin => unreachable,
-    };
-}
-
-pub const nil = make(.nil, {});
-
-pub fn makeObject(
-    allocator: std.mem.Allocator,
-    comptime tag: std.meta.Tag(Body),
-    value: @FieldType(Body, @tagName(tag)),
-) !AstNode {
-    const obj = try allocator.create(Object);
-    obj.* = .{ .body = @unionInit(Body, @tagName(tag), value) };
-    return AstNode{ .object = ObjectPtr.fromPtr(obj) };
-}
-
-pub fn as(
-    comptime tag: std.meta.Tag(AstNode),
-    node: AstNode,
-) ?@FieldType(AstNode, @tagName(tag)) {
-    return switch (node) {
-        tag => |v| v,
-        else => null,
-    };
-}
-
-pub fn asObject(
-    comptime tag: std.meta.Tag(Body),
-    node: AstNode,
-) ?@FieldType(Body, @tagName(tag)) {
-    const obj = switch (node) {
-        .object => |o| o.getPtr(*const Object),
-        else => return null,
-    };
-    return switch (obj.body) {
-        tag => |v| v,
-        else => null,
-    };
-}
-
-const Body = @FieldType(Object, "body");
-
-pub fn unwrap(
-    comptime tag: std.meta.Tag(AstNode),
-    node: AstNode,
-) error{TypeMismatch}!@FieldType(AstNode, @tagName(tag)) {
-    return switch (node) {
-        tag => |v| v,
-        else => {
-            std.debug.print("Type mismatch: expected '{s}', found '{s}'\n", .{
-                @tagName(tag), @tagName(std.meta.activeTag(node)),
-            });
-            return error.TypeMismatch;
-        },
-    };
-}
-
-pub fn unwrapObject(
-    comptime tag: std.meta.Tag(Body),
-    node: AstNode,
-) error{TypeMismatch}!@FieldType(Body, @tagName(tag)) {
-    const obj = switch (node) {
-        .object => |o| o.getPtr(*const Object),
-        else => {
-            std.debug.print("Type mismatch: expected '{s}', found '{s}'\n", .{
-                @tagName(tag), @tagName(std.meta.activeTag(node)),
-            });
-            return error.TypeMismatch;
-        },
-    };
-
-    return switch (obj.body) {
-        tag => |v| v,
-        else => {
-            std.debug.print("Type mismatch: expected '{s}', found 'object.{s}'\n", .{
-                @tagName(tag), @tagName(std.meta.activeTag(obj.body)),
-            });
-            return error.TypeMismatch;
-        },
-    };
-}
