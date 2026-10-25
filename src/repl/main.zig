@@ -64,7 +64,7 @@ fn setupIsocline(allocator: std.mem.Allocator) !void {
 }
 
 fn readline(allocator: std.mem.Allocator) !?[:0]u8 {
-    return try isocline.readline(allocator, "");
+    return try isocline.readline(allocator, "λ");
 }
 
 fn isPromptEmpty(prompt: [:0]u8) bool {
