@@ -46,7 +46,7 @@ pub fn main(init: std.process.Init) !void {
             continue;
         };
 
-        if (liscript.ast.isNil(result) != null) continue;
+        if (liscript.ast.as(.nil, result) != null) continue;
 
         try result.repr(context.symbol_table, &stdout.writer);
         const repr = stdout.written();

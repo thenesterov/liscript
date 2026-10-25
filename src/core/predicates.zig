@@ -75,8 +75,8 @@ pub const Equal = struct {
                         },
                         .cons => |a_cons| switch (b_object_ptr.body) {
                             .cons => |b_cons| {
-                                const car_is_equal = try ast.unwrapBool(try Equal.exec(ptr, a_cons.car, b_cons.car));
-                                const cdr_is_equal = try ast.unwrapBool(try Equal.exec(ptr, a_cons.cdr, b_cons.cdr));
+                                const car_is_equal = try ast.unwrap(.bool, try Equal.exec(ptr, a_cons.car, b_cons.car));
+                                const cdr_is_equal = try ast.unwrap(.bool, try Equal.exec(ptr, a_cons.cdr, b_cons.cdr));
 
                                 break :res car_is_equal.get() and cdr_is_equal.get();
                             },
@@ -94,7 +94,7 @@ pub const Equal = struct {
             else => false,
         };
 
-        return ast.makeBool(result);
+        return ast.make(.bool, result);
     }
 };
 
@@ -134,7 +134,7 @@ pub const GreaterThan = struct {
             else => return PredicateError.CannotCompareNonNumbers,
         };
 
-        return ast.makeBool(result);
+        return ast.make(.bool, result);
     }
 };
 
@@ -174,7 +174,7 @@ pub const GreaterThanEqual = struct {
             else => return PredicateError.CannotCompareNonNumbers,
         };
 
-        return ast.makeBool(result);
+        return ast.make(.bool, result);
     }
 };
 
@@ -214,7 +214,7 @@ pub const LessThan = struct {
             else => return PredicateError.CannotCompareNonNumbers,
         };
 
-        return ast.makeBool(result);
+        return ast.make(.bool, result);
     }
 };
 
@@ -254,6 +254,6 @@ pub const LessThanEqual = struct {
             else => return PredicateError.CannotCompareNonNumbers,
         };
 
-        return ast.makeBool(result);
+        return ast.make(.bool, result);
     }
 };

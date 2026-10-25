@@ -2,11 +2,11 @@ const std = @import("std");
 
 const str = @import("str");
 
-const SymbolTable = @import("symbol_table.zig").SymbolTable;
 const Operator = @import("operators.zig").Operator;
 const Predicate = @import("predicates.zig").Predicate;
 const SpecialForm = @import("special_forms.zig").SpecialForm;
 const Environment = @import("environment.zig").Environment;
+const SymbolTable = @import("symbol_table.zig").SymbolTable;
 
 pub const Float = packed struct {
     bits: u64,
@@ -128,22 +128,79 @@ pub const ObjectPtr = packed struct {
 pub const Cons = struct {
     car: AstNode,
     cdr: AstNode,
+
+    pub fn repr(self: Cons, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
+        try writer.print("(", .{});
+        try self.car.repr(symbol_table, writer);
+
+        var current_cdr = self.cdr;
+        while (current_cdr != .nil) {
+            const obj = current_cdr.object.getPtr(*const Object);
+            const next_pair = obj.body.cons;
+
+            try writer.print(" ", .{});
+            try next_pair.car.repr(symbol_table, writer);
+
+            current_cdr = next_pair.cdr;
+        }
+
+        try writer.print(")", .{});
+    }
 };
 
 pub const Lambda = struct {
     args: AstNode,
     body: AstNode,
     env: *Environment,
+
+    pub fn repr(self: Lambda, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
+        try writer.print("(lambda ", .{});
+
+        if (as(.nil, self.args)) |_| {
+            try writer.print("()", .{});
+        } else {
+            try self.args.repr(symbol_table, writer);
+        }
+        try writer.print(" ", .{});
+        try self.body.repr(symbol_table, writer);
+        try writer.print(")", .{});
+    }
 };
 
 pub const Dambda = struct {
     args: AstNode,
     body: AstNode,
+
+    pub fn repr(self: Dambda, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
+        try writer.print("(dambda ", .{});
+
+        if (as(.nil, self.args)) |_| {
+            try writer.print("()", .{});
+        } else {
+            try self.args.repr(symbol_table, writer);
+        }
+        try writer.print(" ", .{});
+        try self.body.repr(symbol_table, writer);
+        try writer.print(")", .{});
+    }
 };
 
 pub const Macro = struct {
     args: AstNode,
     body: AstNode,
+
+    pub fn repr(self: Macro, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
+        try writer.print("(macro ", .{});
+
+        if (as(.nil, self.args)) |_| {
+            try writer.print("()", .{});
+        } else {
+            try self.args.repr(symbol_table, writer);
+        }
+        try writer.print(" ", .{});
+        try self.body.repr(symbol_table, writer);
+        try writer.print(")", .{});
+    }
 };
 
 pub const Object = struct {
@@ -156,67 +213,14 @@ pub const Object = struct {
     },
 
     pub fn repr(self: Object, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
-        switch (self.body) {
+        return switch (self.body) {
             .string => |string| {
                 try writer.print("\"", .{});
                 try str.escape(string, writer);
                 try writer.print("\"", .{});
             },
-
-            .cons => |pair| {
-                try writer.print("(", .{});
-                try pair.car.repr(symbol_table, writer);
-
-                var current_cdr = pair.cdr;
-                while (current_cdr != .nil) {
-                    const obj = current_cdr.object.getPtr(*const Object);
-                    const next_pair = obj.body.cons;
-
-                    try writer.print(" ", .{});
-                    try next_pair.car.repr(symbol_table, writer);
-
-                    current_cdr = next_pair.cdr;
-                }
-
-                try writer.print(")", .{});
-            },
-            .lambda => |lambda| {
-                try writer.print("(lambda ", .{});
-
-                if (isNil(lambda.args)) |_| {
-                    try writer.print("()", .{});
-                } else {
-                    try lambda.args.repr(symbol_table, writer);
-                }
-                try writer.print(" ", .{});
-                try lambda.body.repr(symbol_table, writer);
-                try writer.print(")", .{});
-            },
-            .dambda => |dambda| {
-                try writer.print("(dambda ", .{});
-
-                if (isNil(dambda.args)) |_| {
-                    try writer.print("()", .{});
-                } else {
-                    try dambda.args.repr(symbol_table, writer);
-                }
-                try writer.print(" ", .{});
-                try dambda.body.repr(symbol_table, writer);
-                try writer.print(")", .{});
-            },
-            .macro => |dambda| {
-                try writer.print("(macro ", .{});
-
-                if (isNil(dambda.args)) |_| {
-                    try writer.print("()", .{});
-                } else {
-                    try dambda.args.repr(symbol_table, writer);
-                }
-                try writer.print(" ", .{});
-                try dambda.body.repr(symbol_table, writer);
-                try writer.print(")", .{});
-            },
-        }
+            inline else => |obj| obj.repr(symbol_table, writer),
+        };
     }
 };
 
@@ -227,9 +231,7 @@ pub const Builtin = union(enum) {
 
     pub fn repr(self: Builtin, writer: *std.Io.Writer) !void {
         return switch (self) {
-            .operator => |operator| try writer.print("{s}", .{operator.repr}),
-            .predicate => |predicate| try writer.print("{s}", .{predicate.repr}),
-            .special_form => |special_form| try writer.print("{s}", .{special_form.repr}),
+            inline else => |builtin| writer.print("{s}", .{builtin.repr}),
         };
     }
 };
@@ -253,17 +255,9 @@ pub const AstNode = union(enum) {
                         cons.car.deinit(allocator);
                     },
                     .string => |string| allocator.free(string),
-                    .lambda => |lambda| {
-                        lambda.args.deinit(allocator);
-                        lambda.body.deinit(allocator);
-                    },
-                    .dambda => |dambda| {
-                        dambda.args.deinit(allocator);
-                        dambda.body.deinit(allocator);
-                    },
-                    .macro => |macro| {
-                        macro.args.deinit(allocator);
-                        macro.body.deinit(allocator);
+                    inline .lambda, .dambda, .macro => |*sf| {
+                        sf.args.deinit(allocator);
+                        sf.body.deinit(allocator);
                     },
                 }
                 allocator.destroy(object_ptr);
@@ -274,225 +268,114 @@ pub const AstNode = union(enum) {
 
     pub fn repr(self: AstNode, symbol_table: SymbolTable, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         switch (self) {
-            .int => |i| try i.repr(writer),
-            .float => |f| try f.repr(writer),
-            .nil => |n| try n.repr(writer),
-            .bool => |b| try b.repr(writer),
             .symbol => |sym| try sym.repr(symbol_table, writer),
             .object => |obj_ptr| try obj_ptr.repr(symbol_table, writer),
-            .builtin => |builtin| try builtin.repr(writer),
+            inline else => |*x| try x.repr(writer),
         }
     }
 };
 
-pub fn makeFloat(f: f64) AstNode {
-    return AstNode{ .float = Float.from(f) };
+fn RawType(comptime tag: std.meta.Tag(AstNode)) type {
+    return switch (tag) {
+        .float => f64,
+        .int => i32,
+        .nil => void,
+        .bool => bool,
+        .symbol => Symbol,
+        .object => @compileError("use makeObject for .object"),
+        else => @compileError("can't make .builtin"),
+    };
 }
 
-pub fn makeInt(i: i32) AstNode {
-    return AstNode{ .int = Int.from(i) };
+pub fn make(
+    comptime tag: std.meta.Tag(AstNode),
+    value: RawType(tag),
+) AstNode {
+    return switch (tag) {
+        .int => .{ .int = Int.from(value) },
+        .float => .{ .float = Float.from(value) },
+        .bool => .{ .bool = Bool.from(value) },
+        .symbol => .{ .symbol = value },
+        .nil => .{ .nil = Nil.from() },
+        .object => unreachable,
+        .builtin => unreachable,
+    };
 }
 
-pub fn makeNil() AstNode {
-    return AstNode{ .nil = Nil.from() };
-}
+pub const nil = make(.nil, {});
 
-pub fn makeCons(allocator: std.mem.Allocator, car: AstNode, cdr: AstNode) !AstNode {
+pub fn makeObject(
+    allocator: std.mem.Allocator,
+    comptime tag: std.meta.Tag(Body),
+    value: @FieldType(Body, @tagName(tag)),
+) !AstNode {
     const obj = try allocator.create(Object);
-    obj.* = .{ .body = .{ .cons = .{
-        .car = car,
-        .cdr = cdr,
-    } } };
+    obj.* = .{ .body = @unionInit(Body, @tagName(tag), value) };
     return AstNode{ .object = ObjectPtr.fromPtr(obj) };
 }
 
-pub fn makeBool(b: bool) AstNode {
-    return AstNode{ .bool = Bool.from(b) };
-}
-
-pub fn makeSymbol(symbol: Symbol) AstNode {
-    return AstNode{ .symbol = symbol };
-}
-
-pub fn makeString(allocator: std.mem.Allocator, string: []const u8) !AstNode {
-    const obj = try allocator.create(Object);
-    obj.* = .{ .body = .{ .string = string } };
-    return AstNode{ .object = ObjectPtr.fromPtr(obj) };
-}
-
-pub fn makeLambda(allocator: std.mem.Allocator, args: AstNode, body: AstNode, environment: *Environment) !AstNode {
-    const obj = try allocator.create(Object);
-    obj.* = .{ .body = .{ .lambda = .{ .args = args, .body = body, .env = environment } } };
-    return AstNode{ .object = ObjectPtr.fromPtr(obj) };
-}
-
-pub fn makeDambda(allocator: std.mem.Allocator, args: AstNode, body: AstNode) !AstNode {
-    const obj = try allocator.create(Object);
-    obj.* = .{ .body = .{ .dambda = .{ .args = args, .body = body } } };
-    return AstNode{ .object = ObjectPtr.fromPtr(obj) };
-}
-
-pub fn makeMacro(allocator: std.mem.Allocator, args: AstNode, body: AstNode) !AstNode {
-    const obj = try allocator.create(Object);
-    obj.* = .{ .body = .{ .macro = .{ .args = args, .body = body } } };
-    return AstNode{ .object = ObjectPtr.fromPtr(obj) };
-}
-
-pub fn isInteger(node: AstNode) ?Int {
+pub fn as(
+    comptime tag: std.meta.Tag(AstNode),
+    node: AstNode,
+) ?@FieldType(AstNode, @tagName(tag)) {
     return switch (node) {
-        .int => |int| int,
+        tag => |v| v,
         else => null,
     };
 }
 
-pub fn isFloat(node: AstNode) ?Float {
-    return switch (node) {
-        .float => |float| float,
+pub fn asObject(
+    comptime tag: std.meta.Tag(Body),
+    node: AstNode,
+) ?@FieldType(Body, @tagName(tag)) {
+    const obj = switch (node) {
+        .object => |o| o.getPtr(*const Object),
+        else => return null,
+    };
+    return switch (obj.body) {
+        tag => |v| v,
         else => null,
     };
 }
 
-pub fn isSymbol(node: AstNode) ?Symbol {
-    return switch (node) {
-        .symbol => |symbol| symbol,
-        else => null,
-    };
-}
+const Body = @FieldType(Object, "body");
 
-pub fn isBoolean(node: AstNode) ?Bool {
+pub fn unwrap(
+    comptime tag: std.meta.Tag(AstNode),
+    node: AstNode,
+) error{TypeMismatch}!@FieldType(AstNode, @tagName(tag)) {
     return switch (node) {
-        .bool => |boolean| boolean,
-        else => null,
-    };
-}
-
-pub fn isNil(node: AstNode) ?Nil {
-    return switch (node) {
-        .nil => |nil| nil,
-        else => null,
-    };
-}
-
-pub fn isCons(node: AstNode) ?Cons {
-    return switch (node) {
-        .object => |object| res: {
-            const object_ptr = object.getPtr(*const Object);
-            break :res switch (object_ptr.body) {
-                .cons => |cons| cons,
-                else => null,
-            };
+        tag => |v| v,
+        else => {
+            std.debug.print("Type mismatch: expected '{s}', found '{s}'\n", .{
+                @tagName(tag), @tagName(std.meta.activeTag(node)),
+            });
+            return error.TypeMismatch;
         },
-        else => null,
     };
 }
 
-pub fn isConsNode(node: AstNode) ?AstNode {
-    return switch (node) {
-        .object => |object| res: {
-            const object_ptr = object.getPtr(*const Object);
-            break :res switch (object_ptr.body) {
-                .cons => node,
-                else => null,
-            };
+pub fn unwrapObject(
+    comptime tag: std.meta.Tag(Body),
+    node: AstNode,
+) error{TypeMismatch}!@FieldType(Body, @tagName(tag)) {
+    const obj = switch (node) {
+        .object => |o| o.getPtr(*const Object),
+        else => {
+            std.debug.print("Type mismatch: expected '{s}', found '{s}'\n", .{
+                @tagName(tag), @tagName(std.meta.activeTag(node)),
+            });
+            return error.TypeMismatch;
         },
-        else => null,
     };
-}
 
-pub fn isString(node: AstNode) ?[]const u8 {
-    return switch (node) {
-        .object => |object| res: {
-            const object_ptr = object.getPtr(*const Object);
-            break :res switch (object_ptr.body) {
-                .string => |string| string,
-                else => null,
-            };
+    return switch (obj.body) {
+        tag => |v| v,
+        else => {
+            std.debug.print("Type mismatch: expected '{s}', found 'object.{s}'\n", .{
+                @tagName(tag), @tagName(std.meta.activeTag(obj.body)),
+            });
+            return error.TypeMismatch;
         },
-        else => null,
-    };
-}
-
-pub fn isLambda(node: AstNode) ?Lambda {
-    return switch (node) {
-        .object => |object| res: {
-            const object_ptr = object.getPtr(*const Object);
-            break :res switch (object_ptr.body) {
-                .lambda => |lambda| lambda,
-                else => null,
-            };
-        },
-        else => null,
-    };
-}
-
-pub fn isDambda(node: AstNode) ?Dambda {
-    return switch (node) {
-        .object => |object| res: {
-            const object_ptr = object.getPtr(*const Object);
-            break :res switch (object_ptr.body) {
-                .dambda => |dambda| dambda,
-                else => null,
-            };
-        },
-        else => null,
-    };
-}
-
-pub fn isMacro(node: AstNode) ?Macro {
-    return switch (node) {
-        .object => |object| res: {
-            const object_ptr = object.getPtr(*const Object);
-            break :res switch (object_ptr.body) {
-                .macro => |macro| macro,
-                else => null,
-            };
-        },
-        else => null,
-    };
-}
-
-pub fn unwrapFloat(node: AstNode) !Float {
-    return switch (node) {
-        .float => |float| float,
-        else => error.IsNotFloat,
-    };
-}
-
-pub fn unwrapInt(node: AstNode) !Int {
-    return switch (node) {
-        .int => |int| int,
-        else => error.IsNotInt,
-    };
-}
-
-pub fn unwrapBool(node: AstNode) !Bool {
-    return switch (node) {
-        .bool => |boolean| boolean,
-        else => error.IsNotBool,
-    };
-}
-
-pub fn unwrapString(node: AstNode) ![]const u8 {
-    return switch (node) {
-        .object => |object| res: {
-            const object_ptr = object.getPtr(*const Object);
-            break :res switch (object_ptr.body) {
-                .string => |string| string,
-                else => error.IsNotString,
-            };
-        },
-        else => error.IsNotString,
-    };
-}
-
-pub fn unwrapCons(node: AstNode) !Cons {
-    if (isCons(node)) |cons| return cons;
-    return error.IsNotCons;
-}
-
-pub fn unwrapSymbol(node: AstNode) !Symbol {
-    return switch (node) {
-        .symbol => |symbol| symbol,
-        else => error.IsNotSymbol,
     };
 }

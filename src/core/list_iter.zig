@@ -26,7 +26,7 @@ pub const ListIterator = struct {
     pub fn next(self: *ListIterator, expect_type: ExpectType) ?AstNode {
         if (self.current == .nil) return null;
 
-        const cons = ast.isCons(self.current) orelse return null;
+        const cons = ast.asObject(.cons, self.current) orelse return null;
         const element = cons.car;
 
         const matches = switch (expect_type) {

@@ -64,6 +64,6 @@ pub const Environment = struct {
             current_env = env.parent;
         }
 
-        return ast.makeSymbol(symbol);
+        return ast.make(.symbol, symbol);
     }
 };

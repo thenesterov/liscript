@@ -63,9 +63,9 @@ pub const Evaluator = struct {
                 .special_form => |special_form| try special_form.exec_fn(special_form.ptr, environment_, self, cons.cdr),
             },
             .object => res: {
-                if (ast.isLambda(head)) |lambda| break :res try self.callLambda(lambda, cons, environment_);
-                if (ast.isDambda(head)) |dambda| break :res try self.callDambda(dambda, cons, environment_);
-                if (ast.isMacro(head)) |macro| break :res try self.callMacro(macro, cons, environment_);
+                if (ast.asObject(.lambda, head)) |lambda| break :res try self.callLambda(lambda, cons, environment_);
+                if (ast.asObject(.dambda, head)) |dambda| break :res try self.callDambda(dambda, cons, environment_);
+                if (ast.asObject(.macro, head)) |macro| break :res try self.callMacro(macro, cons, environment_);
                 return EvaluatorError.CantCallLiteral;
             },
             else => return EvaluatorError.CantCallLiteral,
@@ -83,12 +83,12 @@ pub const Evaluator = struct {
 
         while (true) {
             if (args_iter.current == .nil) {
-                var rest_vals = ast.makeNil();
+                var rest_vals = ast.nil;
                 var tail_ptr: *AstNode = &rest_vals;
 
                 while (vals_iter.next(.any)) |val| {
                     const evaluated_val = try self.evaluate(val, environment_);
-                    const val_cons = try ast.makeCons(self.allocator, evaluated_val, ast.makeNil());
+                    const val_cons = try ast.makeObject(self.allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
 
                     tail_ptr.* = val_cons;
 
@@ -101,11 +101,11 @@ pub const Evaluator = struct {
             }
 
             if (vals_iter.current == .nil) {
-                var rest_args = ast.makeNil();
+                var rest_args = ast.nil;
                 var tail_ptr: *AstNode = &rest_args;
 
                 while (args_iter.next(.symbol)) |arg| {
-                    const arg_cons = try ast.makeCons(self.allocator, arg, ast.makeNil());
+                    const arg_cons = try ast.makeObject(self.allocator, .cons, .{ .car = arg, .cdr = ast.nil });
 
                     tail_ptr.* = arg_cons;
 
@@ -113,7 +113,7 @@ pub const Evaluator = struct {
                     tail_ptr = &arg_cons_ptr.body.cons.cdr;
                 }
 
-                return try ast.makeLambda(self.allocator, rest_args, lambda.body, new_env_ptr);
+                return try ast.makeObject(self.allocator, .lambda, .{ .args = rest_args, .body = lambda.body, .env = new_env_ptr });
             }
 
             const sym_node = args_iter.next(.symbol) orelse return EvaluatorError.LambdaArgMustBeSymbol;
@@ -138,12 +138,12 @@ pub const Evaluator = struct {
 
         while (true) {
             if (args_iter.current == .nil) {
-                var rest_vals = ast.makeNil();
+                var rest_vals = ast.nil;
                 var tail_ptr: *AstNode = &rest_vals;
 
                 while (vals_iter.next(.any)) |val| {
                     const evaluated_val = try self.evaluate(val, environment_);
-                    const val_cons = try ast.makeCons(self.allocator, evaluated_val, ast.makeNil());
+                    const val_cons = try ast.makeObject(self.allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
 
                     tail_ptr.* = val_cons;
 
@@ -182,12 +182,12 @@ pub const Evaluator = struct {
 
         while (true) {
             if (args_iter.current == .nil) {
-                var rest_vals = ast.makeNil();
+                var rest_vals = ast.nil;
                 var tail_ptr: *AstNode = &rest_vals;
 
                 while (vals_iter.next(.any)) |val| {
                     const evaluated_val = try self.evaluate(val, environment_);
-                    const val_cons = try ast.makeCons(self.allocator, evaluated_val, ast.makeNil());
+                    const val_cons = try ast.makeObject(self.allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
 
                     tail_ptr.* = val_cons;
 
@@ -200,11 +200,11 @@ pub const Evaluator = struct {
             }
 
             if (vals_iter.current == .nil) {
-                var rest_args = ast.makeNil();
+                var rest_args = ast.nil;
                 var tail_ptr: *AstNode = &rest_args;
 
                 while (args_iter.next(.symbol)) |arg| {
-                    const arg_cons = try ast.makeCons(self.allocator, arg, ast.makeNil());
+                    const arg_cons = try ast.makeObject(self.allocator, .cons, .{ .car = arg, .cdr = ast.nil });
 
                     tail_ptr.* = arg_cons;
 
@@ -212,7 +212,7 @@ pub const Evaluator = struct {
                     tail_ptr = &arg_cons_ptr.body.cons.cdr;
                 }
 
-                return try ast.makeMacro(self.allocator, rest_args, try self.macroExpand(macro.body, new_env_ptr));
+                return try ast.makeObject(self.allocator, .macro, .{ .args = rest_args, .body = try self.macroExpand(macro.body, new_env_ptr) });
             }
 
             const arg = args_iter.next(.symbol) orelse return EvaluatorError.MacroArgMustBeSymbol;
@@ -231,10 +231,13 @@ pub const Evaluator = struct {
             .object => |object| res: {
                 const object_ptr = object.getPtr(*const Object);
                 break :res switch (object_ptr.body) {
-                    .cons => |cons| try ast.makeCons(
+                    .cons => |cons| try ast.makeObject(
                         self.allocator,
-                        try self.macroExpand(cons.car, environment_),
-                        try self.macroExpand(cons.cdr, environment_),
+                        .cons,
+                        .{
+                            .car = try self.macroExpand(cons.car, environment_),
+                            .cdr = try self.macroExpand(cons.cdr, environment_),
+                        },
                     ),
                     else => node,
                 };
@@ -244,17 +247,17 @@ pub const Evaluator = struct {
     }
 
     fn foldOperator(self: Evaluator, operator: Operator, cdr: AstNode, environment_: *Environment) !AstNode {
-        if (ast.isNil(cdr) != null) {
+        if (ast.as(.nil, cdr) != null) {
             return EvaluatorError.OperatorMustTakeAtLeastOneArgument;
         }
 
-        const args = try ast.unwrapCons(cdr);
+        const args = try ast.unwrapObject(.cons, cdr);
 
         var operand_1 = try self.evaluate(args.car, environment_);
         var rest = args.cdr;
 
-        while (ast.isNil(rest) == null) {
-            const rest_cons = try ast.unwrapCons(rest);
+        while (ast.as(.nil, rest) == null) {
+            const rest_cons = try ast.unwrapObject(.cons, rest);
 
             const operand_2 = try self.evaluate(rest_cons.car, environment_);
             operand_1 = try operator.exec_fn(operator.ptr, operand_1, operand_2);
@@ -265,29 +268,29 @@ pub const Evaluator = struct {
     }
 
     fn foldPredicate(self: Evaluator, predicate: Predicate, cdr: AstNode, environment_: *Environment) !AstNode {
-        if (ast.isNil(cdr) != null) {
-            return ast.makeBool(true);
+        if (ast.as(.nil, cdr) != null) {
+            return ast.make(.bool, true);
         }
 
-        const args = try ast.unwrapCons(cdr);
+        const args = try ast.unwrapObject(.cons, cdr);
 
         var operand_1 = try self.evaluate(args.car, environment_);
         var rest = args.cdr;
 
-        while (ast.isNil(rest) == null) {
-            const rest_cons = try ast.unwrapCons(rest);
+        while (ast.as(.nil, rest) == null) {
+            const rest_cons = try ast.unwrapObject(.cons, rest);
 
             const operand_2 = try self.evaluate(rest_cons.car, environment_);
             const compare_result = try predicate.exec_fn(predicate.ptr, operand_1, operand_2);
 
-            if (!(try ast.unwrapBool(compare_result)).get()) {
-                return ast.makeBool(false);
+            if (!(try ast.unwrap(.bool, compare_result)).get()) {
+                return ast.make(.bool, false);
             }
 
             operand_1 = operand_2;
             rest = rest_cons.cdr;
         }
 
-        return ast.makeBool(true);
+        return ast.make(.bool, true);
     }
 };

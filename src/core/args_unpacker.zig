@@ -100,7 +100,7 @@ pub fn UnpackedResult(comptime spec: anytype, comptime fn_name: []const u8) type
                         self.nodes[i] = rest_chain;
                         self.present_mask |= (@as(u32, 1) << @intCast(i));
                         i += 1;
-                        iter.current = ast.makeNil();
+                        iter.current = ast.nil;
                         break;
                     }
 
@@ -199,14 +199,14 @@ pub fn UnpackedResult(comptime spec: anytype, comptime fn_name: []const u8) type
 }
 
 fn getRealTypeBit(node: AstNode) u16 {
-    if (ast.isNil(node) != null) return ArgType.nil;
-    if (ast.isCons(node) != null) return ArgType.cons;
+    if (ast.asObject(.cons, node) != null) return ArgType.cons;
+    if (ast.asObject(.string, node) != null) return ArgType.string;
 
-    if (ast.isInteger(node) != null) return ArgType.integer;
-    if (ast.isFloat(node) != null) return ArgType.float;
-    if (ast.isString(node) != null) return ArgType.string;
-    if (ast.isSymbol(node) != null) return ArgType.symbol;
-    if (ast.isBoolean(node) != null) return ArgType.boolean;
+    if (ast.as(.nil, node) != null) return ArgType.nil;
+    if (ast.as(.int, node) != null) return ArgType.integer;
+    if (ast.as(.float, node) != null) return ArgType.float;
+    if (ast.as(.symbol, node) != null) return ArgType.symbol;
+    if (ast.as(.bool, node) != null) return ArgType.boolean;
 
     const tag = std.meta.activeTag(node);
     return @as(u16, 1) << @intCast(@intFromEnum(tag));
