@@ -23,19 +23,10 @@ pub const EvaluatorError = error{
 };
 
 pub const Evaluator = struct {
-    allocator: std.mem.Allocator,
-    symbol_table: *SymbolTable,
-
-    writer: *std.Io.Writer,
-    reader: *std.Io.Reader,
+    context: *EvaluatorContext,
 
     pub fn init(context: *EvaluatorContext) Evaluator {
-        return .{
-            .allocator = context.runtime_allocator,
-            .symbol_table = &context.symbol_table,
-            .writer = context.io.writer(),
-            .reader = context.io.reader(),
-        };
+        return .{ .context = context };
     }
 
     pub fn evaluate(self: Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
@@ -73,10 +64,8 @@ pub const Evaluator = struct {
     }
 
     fn callLambda(self: Evaluator, lambda: ast.Lambda, cons: ast.Cons, environment_: *Environment) !AstNode {
-        const rest_vals_symbol = try self.symbol_table.insert("..."); // todo вынести в константу
-
-        const new_env_ptr = try self.allocator.create(Environment);
-        new_env_ptr.* = Environment.init(self.allocator, lambda.env);
+        const new_env_ptr = try self.context.runtime_allocator.create(Environment);
+        new_env_ptr.* = Environment.init(self.context.runtime_allocator, lambda.env);
 
         var args_iter = ListIter.init(lambda.args);
         var vals_iter = ListIter.init(cons.cdr);
@@ -88,7 +77,7 @@ pub const Evaluator = struct {
 
                 while (vals_iter.next(.any)) |val| {
                     const evaluated_val = try self.evaluate(val, environment_);
-                    const val_cons = try ast.makeObject(self.allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
+                    const val_cons = try ast.makeObject(self.context.runtime_allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
 
                     tail_ptr.* = val_cons;
 
@@ -96,7 +85,7 @@ pub const Evaluator = struct {
                     tail_ptr = &val_cons_ptr.body.cons.cdr;
                 }
 
-                try new_env_ptr.def(rest_vals_symbol, rest_vals);
+                try new_env_ptr.def(self.context.symbols.rest_args, rest_vals);
                 break;
             }
 
@@ -105,7 +94,7 @@ pub const Evaluator = struct {
                 var tail_ptr: *AstNode = &rest_args;
 
                 while (args_iter.next(.symbol)) |arg| {
-                    const arg_cons = try ast.makeObject(self.allocator, .cons, .{ .car = arg, .cdr = ast.nil });
+                    const arg_cons = try ast.makeObject(self.context.runtime_allocator, .cons, .{ .car = arg, .cdr = ast.nil });
 
                     tail_ptr.* = arg_cons;
 
@@ -113,7 +102,7 @@ pub const Evaluator = struct {
                     tail_ptr = &arg_cons_ptr.body.cons.cdr;
                 }
 
-                return try ast.makeObject(self.allocator, .lambda, .{ .args = rest_args, .body = lambda.body, .env = new_env_ptr });
+                return try ast.makeObject(self.context.runtime_allocator, .lambda, .{ .args = rest_args, .body = lambda.body, .env = new_env_ptr });
             }
 
             const sym_node = args_iter.next(.symbol) orelse return EvaluatorError.LambdaArgMustBeSymbol;
@@ -128,10 +117,8 @@ pub const Evaluator = struct {
     }
 
     fn callDambda(self: Evaluator, dambda: ast.Dambda, cons: ast.Cons, environment_: *Environment) !AstNode {
-        const rest_vals_symbol = try self.symbol_table.insert("..."); // todo вынести в константу
-
-        const new_env_ptr = try self.allocator.create(Environment);
-        new_env_ptr.* = Environment.init(self.allocator, environment_);
+        const new_env_ptr = try self.context.runtime_allocator.create(Environment);
+        new_env_ptr.* = Environment.init(self.context.runtime_allocator, environment_);
 
         var args_iter = ListIter.init(dambda.args);
         var vals_iter = ListIter.init(cons.cdr);
@@ -143,7 +130,7 @@ pub const Evaluator = struct {
 
                 while (vals_iter.next(.any)) |val| {
                     const evaluated_val = try self.evaluate(val, environment_);
-                    const val_cons = try ast.makeObject(self.allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
+                    const val_cons = try ast.makeObject(self.context.runtime_allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
 
                     tail_ptr.* = val_cons;
 
@@ -151,7 +138,7 @@ pub const Evaluator = struct {
                     tail_ptr = &val_cons_ptr.body.cons.cdr;
                 }
 
-                try new_env_ptr.def(rest_vals_symbol, rest_vals);
+                try new_env_ptr.def(self.context.symbols.rest_args, rest_vals);
                 break;
             }
 
@@ -171,10 +158,8 @@ pub const Evaluator = struct {
     }
 
     fn callMacro(self: Evaluator, macro: ast.Macro, cons: ast.Cons, environment_: *Environment) !AstNode {
-        const rest_vals_symbol = try self.symbol_table.insert("..."); // todo вынести в константу
-
-        const new_env_ptr = try self.allocator.create(Environment);
-        new_env_ptr.* = Environment.init(self.allocator, null);
+        const new_env_ptr = try self.context.runtime_allocator.create(Environment);
+        new_env_ptr.* = Environment.init(self.context.runtime_allocator, null);
         new_env_ptr.global = new_env_ptr;
 
         var args_iter = ListIter.init(macro.args);
@@ -187,7 +172,7 @@ pub const Evaluator = struct {
 
                 while (vals_iter.next(.any)) |val| {
                     const evaluated_val = try self.evaluate(val, environment_);
-                    const val_cons = try ast.makeObject(self.allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
+                    const val_cons = try ast.makeObject(self.context.runtime_allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
 
                     tail_ptr.* = val_cons;
 
@@ -195,7 +180,7 @@ pub const Evaluator = struct {
                     tail_ptr = &val_cons_ptr.body.cons.cdr;
                 }
 
-                try new_env_ptr.def(rest_vals_symbol, rest_vals);
+                try new_env_ptr.def(self.context.symbols.rest_args, rest_vals);
                 break;
             }
 
@@ -204,7 +189,7 @@ pub const Evaluator = struct {
                 var tail_ptr: *AstNode = &rest_args;
 
                 while (args_iter.next(.symbol)) |arg| {
-                    const arg_cons = try ast.makeObject(self.allocator, .cons, .{ .car = arg, .cdr = ast.nil });
+                    const arg_cons = try ast.makeObject(self.context.runtime_allocator, .cons, .{ .car = arg, .cdr = ast.nil });
 
                     tail_ptr.* = arg_cons;
 
@@ -212,7 +197,7 @@ pub const Evaluator = struct {
                     tail_ptr = &arg_cons_ptr.body.cons.cdr;
                 }
 
-                return try ast.makeObject(self.allocator, .macro, .{ .args = rest_args, .body = try self.macroExpand(macro.body, new_env_ptr) });
+                return try ast.makeObject(self.context.runtime_allocator, .macro, .{ .args = rest_args, .body = try self.macroExpand(macro.body, new_env_ptr) });
             }
 
             const arg = args_iter.next(.symbol) orelse return EvaluatorError.MacroArgMustBeSymbol;
@@ -232,7 +217,7 @@ pub const Evaluator = struct {
                 const object_ptr = object.getPtr(*const Object);
                 break :res switch (object_ptr.body) {
                     .cons => |cons| try ast.makeObject(
-                        self.allocator,
+                        self.context.runtime_allocator,
                         .cons,
                         .{
                             .car = try self.macroExpand(cons.car, environment_),

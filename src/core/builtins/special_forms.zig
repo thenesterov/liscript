@@ -14,19 +14,6 @@ const SymbolNode = ast.Symbol;
 const AstNode = ast.AstNode;
 const Object = ast.Object;
 
-pub const SpecialFormError = error{
-    CdrIsNotList,
-    ArgIsNotList,
-    ArgIsNotString,
-    ArgsIsRequired,
-    LambdaArgsMustBeList,
-    LambdaBodyCantBeEmpty,
-    DambdaArgsMustBeList,
-    DambdaBodyCantBeEmpty,
-    MacroArgsMustBeList,
-    MacroBodyCantBeEmpty,
-};
-
 pub const SpecialForm = struct {
     ptr: *const anyopaque,
     repr: []const u8,
@@ -37,15 +24,10 @@ pub fn MakeSpecialForm(comptime name: []const u8, comptime body_fn: anytype) typ
     return struct {
         pub const repr = name;
         symbol: SymbolNode,
-        allocator: std.mem.Allocator,
-        symbol_table: *SymbolTable,
 
         pub fn init(allocator: std.mem.Allocator, symbol_table: *SymbolTable) !@This() {
-            return .{
-                .symbol = try symbol_table.insert(@This().repr),
-                .allocator = allocator,
-                .symbol_table = symbol_table,
-            };
+            _ = allocator;
+            return .{ .symbol = try symbol_table.insert(@This().repr) };
         }
 
         pub fn specialForm(self: *const @This()) SpecialForm {
@@ -89,6 +71,8 @@ pub const TypeOf = MakeSpecialForm("typeof", struct {
         const this = @as(@TypeOf(self), self);
         _ = this;
 
+        const runtime_allocator = evaluator.context.runtime_allocator;
+
         const shape = try args_unpacker.unpack(spec, "typeof", body);
 
         const arg = shape.get("arg");
@@ -99,7 +83,7 @@ pub const TypeOf = MakeSpecialForm("typeof", struct {
             else => |node| @tagName(node),
         };
 
-        return ast.makeObject(self.allocator, .string, type_str);
+        return ast.makeObject(runtime_allocator, .string, type_str);
     }
 }.exec);
 
@@ -113,6 +97,8 @@ pub const Cons = MakeSpecialForm("cons", struct {
         const this = @as(@TypeOf(self), self);
         _ = this;
 
+        const runtime_allocator = evaluator.context.runtime_allocator;
+
         const shape = try args_unpacker.unpack(spec, "cons", body);
 
         const car = shape.get("car");
@@ -121,7 +107,7 @@ pub const Cons = MakeSpecialForm("cons", struct {
         const cdr = shape.get("cdr");
         const evaluated_cdr = try evaluator.evaluate(cdr, environment);
 
-        return ast.makeObject(self.allocator, .cons, .{ .car = evaluated_car, .cdr = evaluated_cdr });
+        return ast.makeObject(runtime_allocator, .cons, .{ .car = evaluated_car, .cdr = evaluated_cdr });
     }
 }.exec);
 
@@ -137,10 +123,12 @@ pub const Car = MakeSpecialForm("car", struct {
         const this = @as(@TypeOf(self), self);
         _ = this;
 
+        const runtime_allocator = evaluator.context.runtime_allocator;
+
         const unevaluated_shape = try args_unpacker.unpack(unevaluatede_spec, "car", body);
         const evaluated_arg = try evaluator.evaluate(unevaluated_shape.get("unevaluated_arg"), environment);
 
-        const wrapped_arg = try ast.makeObject(self.allocator, .cons, .{ .car = evaluated_arg, .cdr = ast.nil });
+        const wrapped_arg = try ast.makeObject(runtime_allocator, .cons, .{ .car = evaluated_arg, .cdr = ast.nil });
 
         const shape = try args_unpacker.unpack(spec, "car", wrapped_arg);
 
@@ -168,10 +156,12 @@ pub const Cdr = MakeSpecialForm("cdr", struct {
         const this = @as(@TypeOf(self), self);
         _ = this;
 
+        const runtime_allocator = evaluator.context.runtime_allocator;
+
         const unevaluated_shape = try args_unpacker.unpack(unevaluatede_spec, "cdr", body);
         const evaluated_arg = try evaluator.evaluate(unevaluated_shape.get("unevaluated_arg"), environment);
 
-        const wrapped_arg = try ast.makeObject(self.allocator, .cons, .{ .car = evaluated_arg, .cdr = ast.nil });
+        const wrapped_arg = try ast.makeObject(runtime_allocator, .cons, .{ .car = evaluated_arg, .cdr = ast.nil });
 
         const shape = try args_unpacker.unpack(spec, "cdr", wrapped_arg);
 
@@ -196,21 +186,23 @@ pub const Write = MakeSpecialForm("write", struct {
         const this = @as(@TypeOf(self), self);
         _ = this;
 
-        const shape = try args_unpacker.unpack(spec, "write", body);
+        const writer = evaluator.context.io.writer();
+        const symbol_table = evaluator.context.symbol_table;
 
+        const shape = try args_unpacker.unpack(spec, "write", body);
         var args_iter = ListIter.init(shape.get("args"));
 
         while (args_iter.next(.any)) |node| {
             const evaluated_node = try evaluator.evaluate(node, environment);
 
             if (ast.asObject(.string, evaluated_node)) |string| {
-                try evaluator.writer.print("{s}", .{string});
+                try writer.print("{s}", .{string});
             } else {
-                try evaluated_node.repr(self.symbol_table.*, evaluator.writer);
+                try evaluated_node.repr(symbol_table, writer);
             }
         }
 
-        try evaluator.writer.flush();
+        try writer.flush();
 
         return ast.nil;
     }
@@ -225,6 +217,9 @@ pub const Print = MakeSpecialForm("print", struct {
         const this = @as(@TypeOf(self), self);
         _ = this;
 
+        const writer = evaluator.context.io.writer();
+        const symbol_table = evaluator.context.symbol_table;
+
         const shape = try args_unpacker.unpack(spec, "print", body);
 
         var args_iter = ListIter.init(shape.get("args"));
@@ -233,15 +228,15 @@ pub const Print = MakeSpecialForm("print", struct {
             const evaluated_node = try evaluator.evaluate(node, environment);
 
             if (ast.asObject(.string, evaluated_node)) |string| {
-                try evaluator.writer.print("{s} ", .{string});
+                try writer.print("{s} ", .{string});
             } else {
-                try evaluated_node.repr(self.symbol_table.*, evaluator.writer);
-                _ = try evaluator.writer.write(" ");
+                try evaluated_node.repr(symbol_table, writer);
+                _ = try writer.write(" ");
             }
         }
 
-        _ = try evaluator.writer.write("\n");
-        try evaluator.writer.flush();
+        _ = try writer.write("\n");
+        try writer.flush();
 
         return ast.nil;
     }
@@ -257,18 +252,22 @@ pub const Input = MakeSpecialForm("input", struct {
         _ = this;
         _ = environment;
 
+        const writer = evaluator.context.io.writer();
+        const reader = evaluator.context.io.reader();
+        const runtime_allocator = evaluator.context.runtime_allocator;
+
         const shape = try args_unpacker.unpack(spec, "input", body);
 
         const boxed_prompt = shape.get("prompt");
         const prompt = ast.unwrapObject(.string, boxed_prompt) catch unreachable;
 
-        _ = try evaluator.writer.write(prompt);
-        try evaluator.writer.flush();
+        _ = try writer.write(prompt);
+        try writer.flush();
 
-        const input = try evaluator.reader.peekDelimiterInclusive('\n');
-        evaluator.reader.toss(input.len);
+        const input = try reader.peekDelimiterInclusive('\n');
+        reader.toss(input.len);
 
-        return ast.makeObject(self.allocator, .string, input);
+        return ast.makeObject(runtime_allocator, .string, input);
     }
 }.exec);
 
@@ -282,19 +281,22 @@ pub const Read = MakeSpecialForm("read", struct {
         _ = this;
         _ = environment;
 
+        const writer = evaluator.context.io.writer();
+        const reader = evaluator.context.io.reader();
+        const iter_arena = evaluator.context.iter_allocator.allocator();
+
         const shape = try args_unpacker.unpack(spec, "read", body);
 
         const boxed_prompt = shape.get("prompt");
         const prompt = ast.unwrapObject(.string, boxed_prompt) catch unreachable;
 
-        _ = try evaluator.writer.write(prompt);
-        try evaluator.writer.flush();
+        _ = try writer.write(prompt);
+        try writer.flush();
 
-        const input = try evaluator.reader.peekDelimiterInclusive('\n');
-        evaluator.reader.toss(input.len);
+        const input = try reader.peekDelimiterInclusive('\n');
+        reader.toss(input.len);
 
-        var lexer = Lexer.init(input);
-        var parser = Parser.init(self.allocator, self.allocator, &lexer, self.symbol_table); // todo pass iter allocator
+        var parser = try evaluator.context.parser(iter_arena, input);
 
         return parser.parse(.{ .check_dungling_tokens = true });
     }
@@ -309,19 +311,20 @@ pub const Symbol = MakeSpecialForm("symbol", struct {
         const this = @as(@TypeOf(self), self);
         _ = this;
         _ = environment;
-        _ = evaluator;
+
+        const symbol_table = &evaluator.context.symbol_table;
 
         const shape = try args_unpacker.unpack(spec, "symbol", body);
 
         const boxed_arg = shape.get("arg");
         const arg = ast.unwrapObject(.string, boxed_arg) catch unreachable;
 
-        return ast.make(.symbol, try self.symbol_table.insert(arg));
+        return ast.make(.symbol, try symbol_table.insert(arg));
     }
 }.exec);
 
 pub const Do = MakeSpecialForm("do", struct {
-    fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
 
@@ -458,14 +461,15 @@ pub const Lambda = MakeSpecialForm("lambda", struct {
     pub fn exec(self: anytype, environment: *Environment, evaluator: Evaluator, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
-        _ = evaluator;
+
+        const runtime_allocator = evaluator.context.runtime_allocator;
 
         const shape = try args_unpacker.unpack(spec, "lambda", body);
 
         const args = shape.get("args");
         const body_ = shape.get("body");
 
-        return try ast.makeObject(self.allocator, .lambda, .{ .args = args, .body = body_, .env = environment });
+        return try ast.makeObject(runtime_allocator, .lambda, .{ .args = args, .body = body_, .env = environment });
     }
 }.exec);
 
@@ -479,14 +483,15 @@ pub const Dambda = MakeSpecialForm("dambda", struct {
         const this = @as(@TypeOf(self), self);
         _ = this;
         _ = environment;
-        _ = evaluator;
+
+        const runtime_allocator = evaluator.context.runtime_allocator;
 
         const shape = try args_unpacker.unpack(spec, "dambda", body);
 
         const args = shape.get("args");
         const body_ = shape.get("body");
 
-        return try ast.makeObject(self.allocator, .dambda, .{ .args = args, .body = body_ });
+        return try ast.makeObject(runtime_allocator, .dambda, .{ .args = args, .body = body_ });
     }
 }.exec);
 
@@ -500,13 +505,14 @@ pub const Macro = MakeSpecialForm("macro", struct {
         const this = @as(@TypeOf(self), self);
         _ = this;
         _ = environment;
-        _ = evaluator;
+
+        const runtime_allocator = evaluator.context.runtime_allocator;
 
         const shape = try args_unpacker.unpack(spec, "dambda", body);
 
         const args = shape.get("args");
         const body_ = shape.get("body");
 
-        return try ast.makeObject(self.allocator, .macro, .{ .args = args, .body = body_ });
+        return try ast.makeObject(runtime_allocator, .macro, .{ .args = args, .body = body_ });
     }
 }.exec);
