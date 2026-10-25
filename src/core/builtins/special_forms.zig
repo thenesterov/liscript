@@ -1,14 +1,14 @@
 const std = @import("std");
 
-const ast = @import("ast.zig");
-const args_unpacker = @import("helpers/args_unpacker.zig");
+const ast = @import("../ast.zig");
+const args_unpacker = @import("../helpers/args_unpacker.zig");
 
-const SymbolTable = @import("symbol_table.zig").SymbolTable;
-const Environment = @import("environment.zig").Environment;
-const Evaluator = @import("evaluator.zig").Evaluator;
-const Lexer = @import("lexer.zig").Lexer;
-const Parser = @import("parser.zig").Parser;
-const ListIter = @import("helpers/list_iter.zig").ListIterator;
+const SymbolTable = @import("../symbol_table.zig").SymbolTable;
+const Environment = @import("../environment.zig").Environment;
+const Evaluator = @import("../evaluator.zig").Evaluator;
+const Lexer = @import("../lexer.zig").Lexer;
+const Parser = @import("../parser.zig").Parser;
+const ListIter = @import("../helpers/list_iter.zig").ListIterator;
 
 const SymbolNode = ast.Symbol;
 const AstNode = ast.AstNode;

@@ -1,10 +1,10 @@
 const std = @import("std");
 
 const str = @import("str");
-const ast = @import("ast.zig");
+const ast = @import("../ast.zig");
 
-const SymbolTable = @import("symbol_table.zig").SymbolTable;
-const Environment = @import("environment.zig").Environment;
+const SymbolTable = @import("../symbol_table.zig").SymbolTable;
+const Environment = @import("../environment.zig").Environment;
 
 const Symbol = ast.Symbol;
 const AstNode = ast.AstNode;

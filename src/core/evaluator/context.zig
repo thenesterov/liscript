@@ -3,9 +3,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
-const operators = @import("../operators.zig");
-const predicates = @import("../predicates.zig");
-const special_forms = @import("../special_forms.zig");
+const operators = @import("../builtins/operators.zig");
+const predicates = @import("../builtins/predicates.zig");
+const special_forms = @import("../builtins/special_forms.zig");
 
 const Symbol = @import("../ast.zig").Symbol;
 const SymbolTable = @import("../symbol_table.zig").SymbolTable;

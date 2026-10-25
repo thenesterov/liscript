@@ -6,9 +6,9 @@ pub const SymbolTable = @import("symbol_table.zig").SymbolTable;
 
 const lexer = @import("lexer.zig");
 const environment = @import("environment.zig");
-pub const operators = @import("operators.zig");
-pub const predicates = @import("predicates.zig");
-pub const special_forms = @import("special_forms.zig");
+pub const operators = @import("builtins/operators.zig");
+pub const predicates = @import("builtins/predicates.zig");
+pub const special_forms = @import("builtins/special_forms.zig");
 
 pub const Span = lexer.Span;
 pub const Lexer = lexer.Lexer;

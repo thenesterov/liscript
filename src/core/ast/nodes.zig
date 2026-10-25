@@ -3,9 +3,9 @@ const std = @import("std");
 const str = @import("str");
 
 const helpers = @import("helpers.zig");
-const Operator = @import("../operators.zig").Operator;
-const Predicate = @import("../predicates.zig").Predicate;
-const SpecialForm = @import("../special_forms.zig").SpecialForm;
+const Operator = @import("../builtins/operators.zig").Operator;
+const Predicate = @import("../builtins/predicates.zig").Predicate;
+const SpecialForm = @import("../builtins/special_forms.zig").SpecialForm;
 const Environment = @import("../environment.zig").Environment;
 const SymbolTable = @import("../symbol_table.zig").SymbolTable;
 

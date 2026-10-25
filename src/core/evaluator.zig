@@ -8,8 +8,8 @@ const AstNode = ast.AstNode;
 const SymbolTable = @import("symbol_table.zig").SymbolTable;
 const Environment = environment.Environment;
 const EnvironmentError = environment.EnvironmentError;
-const Operator = @import("operators.zig").Operator;
-const Predicate = @import("predicates.zig").Predicate;
+const Operator = @import("builtins/operators.zig").Operator;
+const Predicate = @import("builtins/predicates.zig").Predicate;
 const ListIter = @import("helpers/list_iter.zig").ListIterator;
 const EvaluatorContext = @import("evaluator/context.zig").EvaluatorContext;
 
