@@ -61,6 +61,8 @@ pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    b.reference_trace = 20;
+
     const str_utils = b.addModule("str-utils", .{
         .root_source_file = b.path("src/str/utils.zig"),
         .target = target,
