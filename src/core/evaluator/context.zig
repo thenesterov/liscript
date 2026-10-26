@@ -105,7 +105,7 @@ pub const EvaluatorContext = struct {
         try self.registerBuiltin(special_forms.Set);
         try self.registerBuiltin(special_forms.Lambda);
         try self.registerBuiltin(special_forms.Dambda);
-        try self.registerBuiltin(special_forms.Macro);
+        try self.registerBuiltin(special_forms.Racro);
         try self.registerBuiltin(special_forms.Load);
     }
 

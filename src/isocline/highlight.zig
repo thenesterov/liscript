@@ -32,6 +32,7 @@ const keywords = [_][]const u8{
     "set!",
     "lambda",
     "dambda",
+    "racro",
     "macro",
     "...",
 };

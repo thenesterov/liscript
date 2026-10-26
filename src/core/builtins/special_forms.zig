@@ -530,7 +530,7 @@ pub const Dambda = MakeSpecialForm("dambda", struct {
     }
 }.exec);
 
-pub const Macro = MakeSpecialForm("macro", struct {
+pub const Racro = MakeSpecialForm("racro", struct {
     const spec = [_]args_unpacker.Arg{
         .{ .name = "args", .mask = args_unpacker.ArgType.list },
         .{ .name = "body", .mask = args_unpacker.ArgType.any },
@@ -543,12 +543,12 @@ pub const Macro = MakeSpecialForm("macro", struct {
 
         const runtime_allocator = evaluator.context.runtime_allocator;
 
-        const shape = try args_unpacker.unpack(spec, "macro", evaluator.context, body);
+        const shape = try args_unpacker.unpack(spec, "racro", evaluator.context, body);
 
         const args = shape.get("args");
         const body_ = shape.get("body");
 
-        return try ast.makeObject(runtime_allocator, .macro, .{ .args = args, .body = body_ });
+        return try ast.makeObject(runtime_allocator, .racro, .{ .args = args, .body = body_ });
     }
 }.exec);
 

@@ -186,12 +186,12 @@ pub const Dambda = struct {
     }
 };
 
-pub const Macro = struct {
+pub const Racro = struct {
     args: AstNode,
     body: AstNode,
 
-    pub fn repr(self: Macro, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
-        try writer.print("(macro ", .{});
+    pub fn repr(self: Racro, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
+        try writer.print("(racro ", .{});
 
         if (helpers.as(.nil, self.args)) |_| {
             try writer.print("()", .{});
@@ -210,7 +210,7 @@ pub const Object = struct {
         string: []const u8,
         lambda: Lambda,
         dambda: Dambda,
-        macro: Macro,
+        racro: Racro,
     },
 
     pub fn repr(self: Object, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
@@ -256,7 +256,7 @@ pub const AstNode = union(enum) {
                         cons.car.deinit(allocator);
                     },
                     .string => |string| allocator.free(string),
-                    inline .lambda, .dambda, .macro => |*sf| {
+                    inline .lambda, .dambda, .racro => |*sf| {
                         sf.args.deinit(allocator);
                         sf.body.deinit(allocator);
                     },

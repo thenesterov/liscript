@@ -57,7 +57,7 @@ pub const Evaluator = struct {
             .object => res: {
                 if (ast.asObject(.lambda, head)) |lambda| break :res self.callLambda(lambda, cons, environment_);
                 if (ast.asObject(.dambda, head)) |dambda| break :res self.callDambda(dambda, cons, environment_);
-                if (ast.asObject(.macro, head)) |macro| break :res self.callMacro(macro, cons, environment_);
+                if (ast.asObject(.racro, head)) |racro| break :res self.callRacro(racro, cons, environment_);
                 return self.context.fail(
                     EvaluatorError.TypeError,
                     "cannot call non-function type '{s}'",
@@ -199,12 +199,12 @@ pub const Evaluator = struct {
         return try self.evaluate(dambda.body, new_env_ptr);
     }
 
-    fn callMacro(self: *Evaluator, macro: ast.Macro, cons: ast.Cons, environment_: *Environment) !AstNode {
+    fn callRacro(self: *Evaluator, racro: ast.Racro, cons: ast.Cons, environment_: *Environment) !AstNode {
         const new_env_ptr = try self.context.runtime_allocator.create(Environment);
         new_env_ptr.* = Environment.init(self.context.runtime_allocator, null);
         new_env_ptr.global = new_env_ptr;
 
-        var args_iter = ListIter.init(macro.args);
+        var args_iter = ListIter.init(racro.args);
         var vals_iter = ListIter.init(cons.cdr);
 
         while (true) {
@@ -239,20 +239,20 @@ pub const Evaluator = struct {
                     tail_ptr = &arg_cons_ptr.body.cons.cdr;
                 }
 
-                return try ast.makeObject(self.context.runtime_allocator, .macro, .{ .args = rest_args, .body = try self.macroExpand(macro.body, new_env_ptr) });
+                return try ast.makeObject(self.context.runtime_allocator, .racro, .{ .args = rest_args, .body = try self.racroExpand(racro.body, new_env_ptr) });
             }
 
             const arg = args_iter.next(.symbol) orelse {
                 if (ast.asObject(.cons, args_iter.current)) |cons_| {
                     return self.context.fail(
                         EvaluatorError.TypeError,
-                        "macro parameter must be a symbol, not '{s}'",
+                        "racro parameter must be a symbol, not '{s}'",
                         .{ast.nodeTypeName(cons_.car)},
                     );
                 } else {
                     return self.context.fail(
                         EvaluatorError.TypeError,
-                        "macro parameter must be a symbol, not '{s}'",
+                        "racro parameter must be a symbol, not '{s}'",
                         .{ast.nodeTypeName(args_iter.current)},
                     );
                 }
@@ -262,10 +262,10 @@ pub const Evaluator = struct {
             try new_env_ptr.def(arg.symbol, val);
         }
 
-        return try self.evaluate(try self.macroExpand(macro.body, new_env_ptr), environment_);
+        return try self.evaluate(try self.racroExpand(racro.body, new_env_ptr), environment_);
     }
 
-    fn macroExpand(self: *Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
+    fn racroExpand(self: *Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
         return switch (node) {
             .symbol => |symbol| environment_.get(symbol),
 
@@ -276,8 +276,8 @@ pub const Evaluator = struct {
                         self.context.runtime_allocator,
                         .cons,
                         .{
-                            .car = try self.macroExpand(cons.car, environment_),
-                            .cdr = try self.macroExpand(cons.cdr, environment_),
+                            .car = try self.racroExpand(cons.car, environment_),
+                            .cdr = try self.racroExpand(cons.cdr, environment_),
                         },
                     ),
                     else => node,

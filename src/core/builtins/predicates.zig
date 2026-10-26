@@ -84,7 +84,7 @@ pub const Equal = struct {
                             },
                             else => false,
                         },
-                        .lambda, .dambda, .macro => false,
+                        .lambda, .dambda, .racro => false,
                     };
 
                     break :res result;
