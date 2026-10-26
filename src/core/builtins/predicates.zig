@@ -5,6 +5,8 @@ const ast = @import("../ast.zig");
 
 const SymbolTable = @import("../symbol_table.zig").SymbolTable;
 const Environment = @import("../environment.zig").Environment;
+const Evaluator = @import("../evaluator.zig").Evaluator;
+const EvaluatorError = @import("../evaluator.zig").EvaluatorError;
 
 const Symbol = ast.Symbol;
 const AstNode = ast.AstNode;
@@ -17,7 +19,7 @@ pub const PredicateError = error{
 pub const Predicate = struct {
     ptr: *const anyopaque,
     repr: []const u8,
-    exec_fn: *const fn (ptr: *const anyopaque, a: AstNode, b: AstNode) anyerror!AstNode,
+    exec_fn: *const fn (ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) anyerror!AstNode,
 };
 
 pub const Equal = struct {
@@ -39,7 +41,7 @@ pub const Equal = struct {
         try environment.def(self.symbol, .{ .builtin = .{ .predicate = self.predicate() } });
     }
 
-    pub fn exec(ptr: *const anyopaque, a: AstNode, b: AstNode) !AstNode {
+    pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
         const result = switch (a) {
             .float => |a_float| switch (b) {
                 .float => |b_float| @abs(a_float.get() - b_float.get()) < std.math.floatEps(f64),
@@ -75,16 +77,14 @@ pub const Equal = struct {
                         },
                         .cons => |a_cons| switch (b_object_ptr.body) {
                             .cons => |b_cons| {
-                                const car_is_equal = try ast.unwrap(.bool, try Equal.exec(ptr, a_cons.car, b_cons.car));
-                                const cdr_is_equal = try ast.unwrap(.bool, try Equal.exec(ptr, a_cons.cdr, b_cons.cdr));
+                                const car_is_equal = try ast.unwrap(.bool, try Equal.exec(ptr, evaluator, a_cons.car, b_cons.car));
+                                const cdr_is_equal = try ast.unwrap(.bool, try Equal.exec(ptr, evaluator, a_cons.cdr, b_cons.cdr));
 
                                 break :res car_is_equal.get() and cdr_is_equal.get();
                             },
                             else => false,
                         },
-                        .lambda => false,
-                        .dambda => false,
-                        .macro => false,
+                        .lambda, .dambda, .macro => false,
                     };
 
                     break :res result;
@@ -117,21 +117,33 @@ pub const GreaterThan = struct {
         try environment.def(self.symbol, .{ .builtin = .{ .predicate = self.predicate() } });
     }
 
-    pub fn exec(ptr: *const anyopaque, a: AstNode, b: AstNode) !AstNode {
+    pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
         _ = ptr;
 
         const result = switch (a) {
             .int => |a_int| switch (b) {
                 .int => |b_int| a_int.get() > b_int.get(),
                 .float => |b_float| a_int.get() > b_float.get(),
-                else => return PredicateError.CannotCompareNonNumbers,
+                else => return evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot compare '{s}' and '{s}' with '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b), GreaterThan.repr },
+                ),
             },
             .float => |a_float| switch (b) {
                 .int => |b_int| a_float.get() > b_int.get(),
                 .float => |b_float| a_float.get() > b_float.get(),
-                else => return PredicateError.CannotCompareNonNumbers,
+                else => return evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot compare '{s}' and '{s}' with '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b), GreaterThan.repr },
+                ),
             },
-            else => return PredicateError.CannotCompareNonNumbers,
+            else => return evaluator.context.fail(
+                EvaluatorError.TypeError,
+                "cannot compare '{s}' and '{s}' with '{s}'",
+                .{ ast.nodeTypeName(a), ast.nodeTypeName(b), GreaterThan.repr },
+            ),
         };
 
         return ast.make(.bool, result);
@@ -157,21 +169,33 @@ pub const GreaterThanEqual = struct {
         try environment.def(self.symbol, .{ .builtin = .{ .predicate = self.predicate() } });
     }
 
-    pub fn exec(ptr: *const anyopaque, a: AstNode, b: AstNode) !AstNode {
+    pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
         _ = ptr;
 
         const result = switch (a) {
             .int => |a_int| switch (b) {
                 .int => |b_int| a_int.get() >= b_int.get(),
                 .float => |b_float| a_int.get() >= b_float.get(),
-                else => return PredicateError.CannotCompareNonNumbers,
+                else => return evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot compare '{s}' and '{s}' with '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b), GreaterThanEqual.repr },
+                ),
             },
             .float => |a_float| switch (b) {
                 .int => |b_int| a_float.get() >= b_int.get(),
                 .float => |b_float| a_float.get() >= b_float.get(),
-                else => return PredicateError.CannotCompareNonNumbers,
+                else => return evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot compare '{s}' and '{s}' with '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b), GreaterThanEqual.repr },
+                ),
             },
-            else => return PredicateError.CannotCompareNonNumbers,
+            else => return evaluator.context.fail(
+                EvaluatorError.TypeError,
+                "cannot compare '{s}' and '{s}' with '{s}'",
+                .{ ast.nodeTypeName(a), ast.nodeTypeName(b), GreaterThanEqual.repr },
+            ),
         };
 
         return ast.make(.bool, result);
@@ -197,21 +221,33 @@ pub const LessThan = struct {
         try environment.def(self.symbol, .{ .builtin = .{ .predicate = self.predicate() } });
     }
 
-    pub fn exec(ptr: *const anyopaque, a: AstNode, b: AstNode) !AstNode {
+    pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
         _ = ptr;
 
         const result = switch (a) {
             .int => |a_int| switch (b) {
                 .int => |b_int| a_int.get() < b_int.get(),
                 .float => |b_float| a_int.get() < b_float.get(),
-                else => return PredicateError.CannotCompareNonNumbers,
+                else => return evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot compare '{s}' and '{s}' with '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b), LessThan.repr },
+                ),
             },
             .float => |a_float| switch (b) {
                 .int => |b_int| a_float.get() < b_int.get(),
                 .float => |b_float| a_float.get() < b_float.get(),
-                else => return PredicateError.CannotCompareNonNumbers,
+                else => return evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot compare '{s}' and '{s}' with '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b), LessThan.repr },
+                ),
             },
-            else => return PredicateError.CannotCompareNonNumbers,
+            else => return evaluator.context.fail(
+                EvaluatorError.TypeError,
+                "cannot compare '{s}' and '{s}' with '{s}'",
+                .{ ast.nodeTypeName(a), ast.nodeTypeName(b), LessThan.repr },
+            ),
         };
 
         return ast.make(.bool, result);
@@ -237,21 +273,33 @@ pub const LessThanEqual = struct {
         try environment.def(self.symbol, .{ .builtin = .{ .predicate = self.predicate() } });
     }
 
-    pub fn exec(ptr: *const anyopaque, a: AstNode, b: AstNode) !AstNode {
+    pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
         _ = ptr;
 
         const result = switch (a) {
             .int => |a_int| switch (b) {
                 .int => |b_int| a_int.get() <= b_int.get(),
                 .float => |b_float| a_int.get() <= b_float.get(),
-                else => return PredicateError.CannotCompareNonNumbers,
+                else => return evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot compare '{s}' and '{s}' with '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b), LessThanEqual.repr },
+                ),
             },
             .float => |a_float| switch (b) {
                 .int => |b_int| a_float.get() <= b_int.get(),
                 .float => |b_float| a_float.get() <= b_float.get(),
-                else => return PredicateError.CannotCompareNonNumbers,
+                else => return evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot compare '{s}' and '{s}' with '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b), LessThanEqual.repr },
+                ),
             },
-            else => return PredicateError.CannotCompareNonNumbers,
+            else => return evaluator.context.fail(
+                EvaluatorError.TypeError,
+                "cannot compare '{s}' and '{s}' with '{s}'",
+                .{ ast.nodeTypeName(a), ast.nodeTypeName(b), LessThanEqual.repr },
+            ),
         };
 
         return ast.make(.bool, result);

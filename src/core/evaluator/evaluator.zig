@@ -12,15 +12,7 @@ const Operator = @import("../builtins/operators.zig").Operator;
 const Predicate = @import("../builtins/predicates.zig").Predicate;
 const ListIter = @import("../helpers/list_iter.zig").ListIterator;
 const EvaluatorContext = @import("../evaluator/context.zig").EvaluatorContext;
-
-pub const EvaluatorError = error{
-    CantCallLiteral,
-    CantCurryDambda,
-    LambdaArgMustBeSymbol,
-    DambdaArgMustBeSymbol,
-    MacroArgMustBeSymbol,
-    OperatorMustTakeAtLeastOneArgument,
-};
+const EvaluatorError = @import("errors.zig").EvaluatorError;
 
 pub const Evaluator = struct {
     context: *EvaluatorContext,
@@ -29,7 +21,16 @@ pub const Evaluator = struct {
         return .{ .context = context };
     }
 
-    pub fn evaluate(self: Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
+    pub fn evaluate(self: *Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
+        return self.evaluateInner(node, environment_) catch |err| {
+            if (self.context.last_error_node == null) {
+                self.context.setErrorNode(node);
+            }
+            return err;
+        };
+    }
+
+    fn evaluateInner(self: *Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
         return switch (node) {
             .symbol => |symbol| environment_.get(symbol),
             .object => |object| {
@@ -44,26 +45,34 @@ pub const Evaluator = struct {
         };
     }
 
-    fn evaluateList(self: Evaluator, cons: ast.Cons, environment_: *Environment) anyerror!AstNode {
+    fn evaluateList(self: *Evaluator, cons: ast.Cons, environment_: *Environment) anyerror!AstNode {
         const head = try self.evaluate(cons.car, environment_);
 
         return switch (head) {
             .builtin => |builtin| switch (builtin) {
-                .operator => |operator| try self.foldOperator(operator, cons.cdr, environment_),
-                .predicate => |predicate| try self.foldPredicate(predicate, cons.cdr, environment_),
-                .special_form => |special_form| try special_form.exec_fn(special_form.ptr, environment_, self, cons.cdr),
+                .operator => |operator| self.foldOperator(operator, cons.cdr, environment_),
+                .predicate => |predicate| self.foldPredicate(predicate, cons.cdr, environment_),
+                .special_form => |special_form| special_form.exec_fn(special_form.ptr, environment_, self, cons.cdr),
             },
             .object => res: {
-                if (ast.asObject(.lambda, head)) |lambda| break :res try self.callLambda(lambda, cons, environment_);
-                if (ast.asObject(.dambda, head)) |dambda| break :res try self.callDambda(dambda, cons, environment_);
-                if (ast.asObject(.macro, head)) |macro| break :res try self.callMacro(macro, cons, environment_);
-                return EvaluatorError.CantCallLiteral;
+                if (ast.asObject(.lambda, head)) |lambda| break :res self.callLambda(lambda, cons, environment_);
+                if (ast.asObject(.dambda, head)) |dambda| break :res self.callDambda(dambda, cons, environment_);
+                if (ast.asObject(.macro, head)) |macro| break :res self.callMacro(macro, cons, environment_);
+                return self.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot call non-function type '{s}'",
+                    .{ast.nodeTypeName(head)},
+                );
             },
-            else => return EvaluatorError.CantCallLiteral,
+            else => return self.context.fail(
+                EvaluatorError.TypeError,
+                "cannot call non-function type '{s}'",
+                .{ast.nodeTypeName(head)},
+            ),
         };
     }
 
-    fn callLambda(self: Evaluator, lambda: ast.Lambda, cons: ast.Cons, environment_: *Environment) !AstNode {
+    fn callLambda(self: *Evaluator, lambda: ast.Lambda, cons: ast.Cons, environment_: *Environment) !AstNode {
         const new_env_ptr = try self.context.runtime_allocator.create(Environment);
         new_env_ptr.* = Environment.init(self.context.runtime_allocator, lambda.env);
 
@@ -105,7 +114,21 @@ pub const Evaluator = struct {
                 return try ast.makeObject(self.context.runtime_allocator, .lambda, .{ .args = rest_args, .body = lambda.body, .env = new_env_ptr });
             }
 
-            const sym_node = args_iter.next(.symbol) orelse return EvaluatorError.LambdaArgMustBeSymbol;
+            const sym_node = args_iter.next(.symbol) orelse {
+                if (ast.asObject(.cons, args_iter.current)) |cons_| {
+                    return self.context.fail(
+                        EvaluatorError.TypeError,
+                        "lambda parameter must be a symbol, not '{s}'",
+                        .{ast.nodeTypeName(cons_.car)},
+                    );
+                } else {
+                    return self.context.fail(
+                        EvaluatorError.TypeError,
+                        "lambda parameter must be a symbol, not '{s}'",
+                        .{ast.nodeTypeName(args_iter.current)},
+                    );
+                }
+            };
             const raw_val_node = vals_iter.next(.any) orelse break;
 
             const evaluated_val = try self.evaluate(raw_val_node, environment_);
@@ -116,12 +139,15 @@ pub const Evaluator = struct {
         return try self.evaluate(lambda.body, new_env_ptr);
     }
 
-    fn callDambda(self: Evaluator, dambda: ast.Dambda, cons: ast.Cons, environment_: *Environment) !AstNode {
+    fn callDambda(self: *Evaluator, dambda: ast.Dambda, cons: ast.Cons, environment_: *Environment) !AstNode {
         const new_env_ptr = try self.context.runtime_allocator.create(Environment);
         new_env_ptr.* = Environment.init(self.context.runtime_allocator, environment_);
 
         var args_iter = ListIter.init(dambda.args);
         var vals_iter = ListIter.init(cons.cdr);
+
+        const expected_arity = args_iter.len();
+        const provided_arity = vals_iter.len();
 
         while (true) {
             if (args_iter.current == .nil) {
@@ -142,11 +168,27 @@ pub const Evaluator = struct {
                 break;
             }
 
-            if (vals_iter.current == .nil) {
-                return EvaluatorError.CantCurryDambda;
-            }
+            if (vals_iter.current == .nil) return self.context.fail(
+                EvaluatorError.TypeError,
+                "currying is not allowed for dambda (expected {d}, got {d})",
+                .{ expected_arity, provided_arity },
+            );
 
-            const sym_node = args_iter.next(.symbol) orelse return EvaluatorError.DambdaArgMustBeSymbol;
+            const sym_node = args_iter.next(.symbol) orelse {
+                if (ast.asObject(.cons, args_iter.current)) |cons_| {
+                    return self.context.fail(
+                        EvaluatorError.TypeError,
+                        "dambda parameter must be a symbol, not '{s}'",
+                        .{ast.nodeTypeName(cons_.car)},
+                    );
+                } else {
+                    return self.context.fail(
+                        EvaluatorError.TypeError,
+                        "dambda parameter must be a symbol, not '{s}'",
+                        .{ast.nodeTypeName(args_iter.current)},
+                    );
+                }
+            };
             const raw_val_node = vals_iter.next(.any) orelse break;
 
             const evaluated_val = try self.evaluate(raw_val_node, environment_);
@@ -157,7 +199,7 @@ pub const Evaluator = struct {
         return try self.evaluate(dambda.body, new_env_ptr);
     }
 
-    fn callMacro(self: Evaluator, macro: ast.Macro, cons: ast.Cons, environment_: *Environment) !AstNode {
+    fn callMacro(self: *Evaluator, macro: ast.Macro, cons: ast.Cons, environment_: *Environment) !AstNode {
         const new_env_ptr = try self.context.runtime_allocator.create(Environment);
         new_env_ptr.* = Environment.init(self.context.runtime_allocator, null);
         new_env_ptr.global = new_env_ptr;
@@ -200,7 +242,21 @@ pub const Evaluator = struct {
                 return try ast.makeObject(self.context.runtime_allocator, .macro, .{ .args = rest_args, .body = try self.macroExpand(macro.body, new_env_ptr) });
             }
 
-            const arg = args_iter.next(.symbol) orelse return EvaluatorError.MacroArgMustBeSymbol;
+            const arg = args_iter.next(.symbol) orelse {
+                if (ast.asObject(.cons, args_iter.current)) |cons_| {
+                    return self.context.fail(
+                        EvaluatorError.TypeError,
+                        "macro parameter must be a symbol, not '{s}'",
+                        .{ast.nodeTypeName(cons_.car)},
+                    );
+                } else {
+                    return self.context.fail(
+                        EvaluatorError.TypeError,
+                        "macro parameter must be a symbol, not '{s}'",
+                        .{ast.nodeTypeName(args_iter.current)},
+                    );
+                }
+            };
             const val = vals_iter.next(.any) orelse break;
 
             try new_env_ptr.def(arg.symbol, val);
@@ -209,7 +265,7 @@ pub const Evaluator = struct {
         return try self.evaluate(try self.macroExpand(macro.body, new_env_ptr), environment_);
     }
 
-    fn macroExpand(self: Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
+    fn macroExpand(self: *Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
         return switch (node) {
             .symbol => |symbol| environment_.get(symbol),
 
@@ -231,10 +287,12 @@ pub const Evaluator = struct {
         };
     }
 
-    fn foldOperator(self: Evaluator, operator: Operator, cdr: AstNode, environment_: *Environment) !AstNode {
-        if (ast.as(.nil, cdr) != null) {
-            return EvaluatorError.OperatorMustTakeAtLeastOneArgument;
-        }
+    fn foldOperator(self: *Evaluator, operator: Operator, cdr: AstNode, environment_: *Environment) !AstNode {
+        if (ast.as(.nil, cdr) != null) return self.context.fail(
+            EvaluatorError.TypeError,
+            "operator '{s}' requires at least 1 argument",
+            .{operator.repr},
+        );
 
         const args = try ast.unwrapObject(.cons, cdr);
 
@@ -245,14 +303,14 @@ pub const Evaluator = struct {
             const rest_cons = try ast.unwrapObject(.cons, rest);
 
             const operand_2 = try self.evaluate(rest_cons.car, environment_);
-            operand_1 = try operator.exec_fn(operator.ptr, operand_1, operand_2);
+            operand_1 = try operator.exec_fn(operator.ptr, self, operand_1, operand_2);
             rest = rest_cons.cdr;
         }
 
         return operand_1;
     }
 
-    fn foldPredicate(self: Evaluator, predicate: Predicate, cdr: AstNode, environment_: *Environment) !AstNode {
+    fn foldPredicate(self: *Evaluator, predicate: Predicate, cdr: AstNode, environment_: *Environment) !AstNode {
         if (ast.as(.nil, cdr) != null) {
             return ast.make(.bool, true);
         }
@@ -266,7 +324,7 @@ pub const Evaluator = struct {
             const rest_cons = try ast.unwrapObject(.cons, rest);
 
             const operand_2 = try self.evaluate(rest_cons.car, environment_);
-            const compare_result = try predicate.exec_fn(predicate.ptr, operand_1, operand_2);
+            const compare_result = try predicate.exec_fn(predicate.ptr, self, operand_1, operand_2);
 
             if (!(try ast.unwrap(.bool, compare_result)).get()) {
                 return ast.make(.bool, false);

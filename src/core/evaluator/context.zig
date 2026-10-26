@@ -3,6 +3,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 
+const ast = @import("../ast.zig");
+
 const operators = @import("../builtins/operators.zig");
 const predicates = @import("../builtins/predicates.zig");
 const special_forms = @import("../builtins/special_forms.zig");
@@ -12,8 +14,11 @@ const SymbolTable = @import("../symbol_table.zig").SymbolTable;
 const Environment = @import("../environment.zig").Environment;
 const Lexer = @import("../lexer.zig").Lexer;
 const Parser = @import("../parser.zig").Parser;
+const EvaluatorError = @import("errors.zig").EvaluatorError;
 
 const IoContext = struct {
+    io: std.Io,
+
     _stdout_buf: [1024]u8,
     _stdin_buf: [1024]u8,
 
@@ -21,6 +26,7 @@ const IoContext = struct {
     _file_reader: std.Io.File.Reader,
 
     pub fn init(self: *IoContext, io: std.Io) void {
+        self.io = io;
         self._file_writer = .init(.stdout(), io, &self._stdout_buf);
         self._file_reader = .init(.stdin(), io, &self._stdin_buf);
     }
@@ -47,6 +53,9 @@ pub const EvaluatorContext = struct {
     symbols: SymbolsContext,
     symbol_table: SymbolTable,
     environment: Environment,
+
+    last_error_node: ?ast.AstNode = null,
+    last_error_message: ?[]const u8 = null,
 
     pub fn init(self: *EvaluatorContext, io: std.Io, iter_allocator: *ArenaAllocator, runtime_allocator: Allocator) !void {
         self.* = .{
@@ -97,6 +106,7 @@ pub const EvaluatorContext = struct {
         try self.registerBuiltin(special_forms.Lambda);
         try self.registerBuiltin(special_forms.Dambda);
         try self.registerBuiltin(special_forms.Macro);
+        try self.registerBuiltin(special_forms.Load);
     }
 
     pub fn deinit(self: *EvaluatorContext) void {
@@ -109,6 +119,25 @@ pub const EvaluatorContext = struct {
         lexer_ptr.* = .init(source);
 
         return .init(iter_allocator, self.runtime_allocator, lexer_ptr, &self.symbol_table);
+    }
+
+    pub fn setErrorMessage(self: *EvaluatorContext, comptime fmt: []const u8, args: anytype) void {
+        const allocator = self.iter_allocator.allocator();
+        self.last_error_message = std.fmt.allocPrint(allocator, fmt, args) catch "Out of memory while formatting error";
+    }
+
+    pub fn setErrorNode(self: *EvaluatorContext, node: ast.AstNode) void {
+        self.last_error_node = node;
+    }
+
+    pub fn fail(self: *EvaluatorContext, err: EvaluatorError, comptime fmt: []const u8, args: anytype) EvaluatorError {
+        switch (err) {
+            EvaluatorError.TypeError => self.setErrorMessage("TypeError: " ++ fmt, args),
+            EvaluatorError.NameError => self.setErrorMessage("NameError: " ++ fmt, args),
+            EvaluatorError.RuntimeError => self.setErrorMessage("RuntimeError: " ++ fmt, args),
+            EvaluatorError.ZeroDivisionError => self.setErrorMessage("ZeroDivisionError: " ++ fmt, args),
+        }
+        return err;
     }
 
     fn registerBuiltin(self: *EvaluatorContext, comptime T: type) !void {

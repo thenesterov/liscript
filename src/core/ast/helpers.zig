@@ -4,6 +4,13 @@ const nodes = @import("nodes.zig");
 
 const AstNode = nodes.AstNode;
 
+pub fn nodeTypeName(node: AstNode) []const u8 {
+    return switch (node) {
+        .object => |obj| @tagName(std.meta.activeTag(obj.getPtr(*const nodes.Object).body)),
+        else => @tagName(std.meta.activeTag(node)),
+    };
+}
+
 fn RawType(comptime tag: std.meta.Tag(AstNode)) type {
     return switch (tag) {
         .float => f64,
@@ -75,12 +82,7 @@ pub fn unwrap(
 ) error{TypeMismatch}!@FieldType(AstNode, @tagName(tag)) {
     return switch (node) {
         tag => |v| v,
-        else => {
-            std.debug.print("Type mismatch: expected '{s}', found '{s}'\n", .{
-                @tagName(tag), @tagName(std.meta.activeTag(node)),
-            });
-            return error.TypeMismatch;
-        },
+        else => error.TypeMismatch,
     };
 }
 
@@ -90,21 +92,11 @@ pub fn unwrapObject(
 ) error{TypeMismatch}!@FieldType(Body, @tagName(tag)) {
     const obj = switch (node) {
         .object => |o| o.getPtr(*const nodes.Object),
-        else => {
-            std.debug.print("Type mismatch: expected '{s}', found '{s}'\n", .{
-                @tagName(tag), @tagName(std.meta.activeTag(node)),
-            });
-            return error.TypeMismatch;
-        },
+        else => return error.TypeMismatch,
     };
 
     return switch (obj.body) {
         tag => |v| v,
-        else => {
-            std.debug.print("Type mismatch: expected '{s}', found 'object.{s}'\n", .{
-                @tagName(tag), @tagName(std.meta.activeTag(obj.body)),
-            });
-            return error.TypeMismatch;
-        },
+        else => error.TypeMismatch,
     };
 }

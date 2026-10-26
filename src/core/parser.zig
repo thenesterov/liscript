@@ -42,7 +42,8 @@ pub const Parser = struct {
             .l_paren => try self.parseList(),
             .string => |string| res: {
                 const unescaped_string = try str.unescape(self.allocator, string);
-                break :res try ast.makeObject(self.runtime_allocator, .string, unescaped_string);
+                const owned_string = try self.runtime_allocator.dupe(u8, unescaped_string);
+                break :res try ast.makeObject(self.runtime_allocator, .string, owned_string);
             },
             .integer => |integer| res: {
                 const parsed_int = std.fmt.parseInt(i32, integer, 10) catch return ParserError.IncorrectNumberFormat;

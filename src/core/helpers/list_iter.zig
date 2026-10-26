@@ -55,4 +55,13 @@ pub const ListIterator = struct {
 
         return null;
     }
+
+    pub fn len(self: ListIterator) usize {
+        var count: usize = 0;
+        var iter = self;
+        while (iter.next(.any) != null) {
+            count += 1;
+        }
+        return count;
+    }
 };

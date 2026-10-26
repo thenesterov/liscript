@@ -1,9 +1,12 @@
 const std = @import("std");
 
 const ast = @import("../ast.zig");
+const evaluator_ = @import("../evaluator.zig");
 
 const SymbolTable = @import("../symbol_table.zig").SymbolTable;
 const Environment = @import("../environment.zig").Environment;
+const Evaluator = evaluator_.Evaluator;
+const EvaluatorError = evaluator_.EvaluatorError;
 
 const Symbol = ast.Symbol;
 const AstNode = ast.AstNode;
@@ -37,7 +40,7 @@ pub const OperatorError = error{
 pub const Operator = struct {
     ptr: *const anyopaque,
     repr: []const u8,
-    exec_fn: *const fn (ptr: *const anyopaque, a: AstNode, b: AstNode) anyerror!AstNode,
+    exec_fn: *const fn (ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) anyerror!AstNode,
 };
 
 pub const Add = struct {
@@ -59,20 +62,32 @@ pub const Add = struct {
         try environment.def(self.symbol, .{ .builtin = .{ .operator = self.operator() } });
     }
 
-    pub fn exec(ptr: *const anyopaque, a: AstNode, b: AstNode) !AstNode {
+    pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
         _ = ptr;
         return switch (a) {
             .int => |a_int| switch (b) {
                 .int => |b_int| ast.make(.int, a_int.get() + b_int.get()),
                 .float => |b_float| ast.make(.float, @as(f64, @floatFromInt(a_int.get())) + b_float.get()),
-                else => OperatorError.CannotAddIntWithNonNumber,
+                else => evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot add '{s}' and '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+                ),
             },
             .float => |a_float| switch (b) {
                 .int => |b_int| ast.make(.float, a_float.get() + @as(f64, @floatFromInt(b_int.get()))),
                 .float => |b_float| ast.make(.float, a_float.get() + b_float.get()),
-                else => OperatorError.CannotAddFloatWithNonNumber,
+                else => evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot add '{s}' and '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+                ),
             },
-            else => return OperatorError.CannotAddNonNumber,
+            else => return evaluator.context.fail(
+                EvaluatorError.TypeError,
+                "cannot add '{s}' and '{s}'",
+                .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+            ),
         };
     }
 };
@@ -96,20 +111,32 @@ pub const Sub = struct {
         try environment.def(self.symbol, .{ .builtin = .{ .operator = self.operator() } });
     }
 
-    pub fn exec(ptr: *const anyopaque, a: AstNode, b: AstNode) !AstNode {
+    pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
         _ = ptr;
         return switch (a) {
             .int => |a_int| switch (b) {
                 .int => |b_int| ast.make(.int, a_int.get() - b_int.get()),
                 .float => |b_float| ast.make(.float, @as(f64, @floatFromInt(a_int.get())) - b_float.get()),
-                else => OperatorError.CannotSubIntWithNonNumber,
+                else => evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot subtract '{s}' and '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+                ),
             },
             .float => |a_float| switch (b) {
                 .int => |b_int| ast.make(.float, a_float.get() - @as(f64, @floatFromInt(b_int.get()))),
                 .float => |b_float| ast.make(.float, a_float.get() - b_float.get()),
-                else => OperatorError.CannotSubFloatWithNonNumber,
+                else => evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot subtract '{s}' and '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+                ),
             },
-            else => return OperatorError.CannotSubNonNumber,
+            else => evaluator.context.fail(
+                EvaluatorError.TypeError,
+                "cannot subtract '{s}' and '{s}'",
+                .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+            ),
         };
     }
 };
@@ -133,20 +160,32 @@ pub const Mul = struct {
         try environment.def(self.symbol, .{ .builtin = .{ .operator = self.operator() } });
     }
 
-    pub fn exec(ptr: *const anyopaque, a: AstNode, b: AstNode) !AstNode {
+    pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
         _ = ptr;
         return switch (a) {
             .int => |a_int| switch (b) {
                 .int => |b_int| ast.make(.int, a_int.get() * b_int.get()),
                 .float => |b_float| ast.make(.float, @as(f64, @floatFromInt(a_int.get())) * b_float.get()),
-                else => OperatorError.CannotMulIntWithNonNumber,
+                else => evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot multiply '{s}' and '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+                ),
             },
             .float => |a_float| switch (b) {
                 .int => |b_int| ast.make(.float, a_float.get() * @as(f64, @floatFromInt(b_int.get()))),
                 .float => |b_float| ast.make(.float, a_float.get() * b_float.get()),
-                else => OperatorError.CannotMulFloatWithNonNumber,
+                else => evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot multiply '{s}' and '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+                ),
             },
-            else => return OperatorError.CannotMulNonNumber,
+            else => return evaluator.context.fail(
+                EvaluatorError.TypeError,
+                "cannot multiply '{s}' and '{s}'",
+                .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+            ),
         };
     }
 };
@@ -170,32 +209,44 @@ pub const Div = struct {
         try environment.def(self.symbol, .{ .builtin = .{ .operator = self.operator() } });
     }
 
-    pub fn exec(ptr: *const anyopaque, a: AstNode, b: AstNode) !AstNode {
+    pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
         _ = ptr;
         return switch (a) {
             .int => |a_int| switch (b) {
                 .int => |b_int| res: {
-                    if (b_int.get() == 0) return OperatorError.ZeroDivision;
+                    if (b_int.get() == 0) return evaluator.context.fail(EvaluatorError.ZeroDivisionError, "division by zero", .{});
                     break :res ast.make(.int, @divFloor(a_int.get(), b_int.get()));
                 },
                 .float => |b_float| res: {
-                    if (b_float.get() == 0) return OperatorError.ZeroDivision;
+                    if (b_float.get() == 0) return evaluator.context.fail(EvaluatorError.ZeroDivisionError, "division by zero", .{});
                     break :res ast.make(.float, @as(f64, @floatFromInt(a_int.get())) / b_float.get());
                 },
-                else => OperatorError.CannotDivIntWithNonNumber,
+                else => evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot divide '{s}' and '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+                ),
             },
             .float => |a_float| switch (b) {
                 .int => |b_int| res: {
-                    if (b_int.get() == 0) return OperatorError.ZeroDivision;
+                    if (b_int.get() == 0) return evaluator.context.fail(EvaluatorError.ZeroDivisionError, "division by zero", .{});
                     break :res ast.make(.float, a_float.get() / @as(f64, @floatFromInt(b_int.get())));
                 },
                 .float => |b_float| res: {
-                    if (b_float.get() == 0) return OperatorError.ZeroDivision;
+                    if (b_float.get() == 0) return evaluator.context.fail(EvaluatorError.ZeroDivisionError, "division by zero", .{});
                     break :res ast.make(.float, a_float.get() / b_float.get());
                 },
-                else => OperatorError.CannotDivFloatWithNonNumber,
+                else => evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot divide '{s}' and '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+                ),
             },
-            else => return OperatorError.CannotDivNonNumber,
+            else => return evaluator.context.fail(
+                EvaluatorError.TypeError,
+                "cannot divide '{s}' and '{s}'",
+                .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+            ),
         };
     }
 };
@@ -219,20 +270,32 @@ pub const Mod = struct {
         try environment.def(self.symbol, .{ .builtin = .{ .operator = self.operator() } });
     }
 
-    pub fn exec(ptr: *const anyopaque, a: AstNode, b: AstNode) !AstNode {
+    pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
         _ = ptr;
         return switch (a) {
             .int => |a_int| switch (b) {
                 .int => |b_int| ast.make(.int, @mod(a_int.get(), b_int.get())),
                 .float => |b_float| ast.make(.float, @as(f64, try std.math.mod(f64, a_int.get(), b_float.get()))),
-                else => OperatorError.CannotModIntWithNonNumber,
+                else => evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot modulo '{s}' and '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+                ),
             },
             .float => |a_float| switch (b) {
                 .int => |b_int| ast.make(.float, try std.math.mod(f64, a_float.get(), @as(f64, @floatFromInt(b_int.get())))),
                 .float => |b_float| ast.make(.float, try std.math.mod(f64, a_float.get(), b_float.get())),
-                else => OperatorError.CannotModFloatWithNonNumber,
+                else => evaluator.context.fail(
+                    EvaluatorError.TypeError,
+                    "cannot modulo '{s}' and '{s}'",
+                    .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+                ),
             },
-            else => return OperatorError.CannotModNonNumber,
+            else => return evaluator.context.fail(
+                EvaluatorError.TypeError,
+                "cannot modulo '{s}' and '{s}'",
+                .{ ast.nodeTypeName(a), ast.nodeTypeName(b) },
+            ),
         };
     }
 };
@@ -256,7 +319,9 @@ pub const Concat = struct {
         try environment.def(self.symbol, .{ .builtin = .{ .operator = self.operator() } });
     }
 
-    pub fn exec(ptr: *const anyopaque, a: AstNode, b: AstNode) !AstNode {
+    pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
+        _ = evaluator;
+
         const self: *const Concat = @ptrCast(@alignCast(ptr));
 
         const a_string = ast.unwrapObject(.string, a) catch return OperatorError.CannotConcatWithNonString;

@@ -4,6 +4,8 @@ const ast = @import("../ast.zig");
 
 const AstNode = ast.AstNode;
 const ListIter = @import("list_iter.zig").ListIterator;
+const EvaluatorError = @import("../evaluator.zig").EvaluatorError;
+const EvaluatorContext = @import("../evaluator.zig").EvaluatorContext;
 
 pub const ArgType = struct {
     pub const any: u16 = 0xFFFF;
@@ -28,8 +30,8 @@ pub const Arg = struct {
     require_even: bool = false,
 };
 
-pub fn unpack(comptime spec: anytype, comptime fn_name: []const u8, args_cdr: AstNode) !UnpackedResult(spec, fn_name) {
-    return try UnpackedResult(spec, fn_name).doUnpack(args_cdr);
+pub fn unpack(comptime spec: anytype, comptime fn_name: []const u8, context: *EvaluatorContext, args_cdr: AstNode) !UnpackedResult(spec, fn_name) {
+    return try UnpackedResult(spec, fn_name).doUnpack(context, args_cdr);
 }
 
 pub fn UnpackedResult(comptime spec: anytype, comptime fn_name: []const u8) type {
@@ -64,7 +66,7 @@ pub fn UnpackedResult(comptime spec: anytype, comptime fn_name: []const u8) type
             present_mask: u32 = 0,
             count: usize = 0,
 
-            fn doUnpack(cdr: AstNode) !Self {
+            fn doUnpack(context: *EvaluatorContext, cdr: AstNode) !Self {
                 var self = Self{};
                 var iter = ListIter.init(cdr);
                 var i: usize = 0;
@@ -85,14 +87,11 @@ pub fn UnpackedResult(comptime spec: anytype, comptime fn_name: []const u8) type
                                     if (idx == i) expected_types = comptime getMaskNames(s.mask);
                                 }
 
-                                std.debug.print("TypeError in '{s}': rest argument element {} ('{s}') expected {s}, but got {s}\n", .{
-                                    fn_name,
-                                    check_idx,
-                                    current_spec.name,
-                                    expected_types,
-                                    @tagName(tail_node),
-                                });
-                                return error.InvalidArgumentType;
+                                return context.fail(
+                                    EvaluatorError.TypeError,
+                                    "argument '{s}' element {d} expected {s}, got '{s}'",
+                                    .{ current_spec.name, check_idx, expected_types, ast.nodeTypeName(tail_node) },
+                                );
                             }
                             check_idx += 1;
                         }
@@ -111,13 +110,11 @@ pub fn UnpackedResult(comptime spec: anytype, comptime fn_name: []const u8) type
                             inline for (spec, 0..) |s, idx| {
                                 if (idx == i) expected_types = comptime getMaskNames(s.mask);
                             }
-                            std.debug.print("TypeError in '{s}': argument '{s}' expected {s}, but got {s}\n", .{
-                                fn_name,
-                                current_spec.name,
-                                expected_types,
-                                @tagName(arg_node),
-                            });
-                            return error.InvalidArgumentType;
+                            return context.fail(
+                                EvaluatorError.TypeError,
+                                "argument '{s}' expected {s}, got '{s}'",
+                                .{ current_spec.name, expected_types, ast.nodeTypeName(arg_node) },
+                            );
                         }
 
                         self.nodes[i] = arg_node;
@@ -138,24 +135,30 @@ pub fn UnpackedResult(comptime spec: anytype, comptime fn_name: []const u8) type
                             }
 
                             if (tail_count % 2 != 0) {
-                                std.debug.print("Runtime Error inside '{s}': rest argument '{s}' expects an even number of elements (pairs), but got {}.\n", .{
-                                    fn_name,
-                                    current_spec.name,
-                                    tail_count,
-                                });
-                                return error.OddArgumentCount;
+                                return context.fail(
+                                    EvaluatorError.TypeError,
+                                    "argument '{s}' expects an even number of elements, got {d}",
+                                    .{ current_spec.name, tail_count },
+                                );
                             }
                         }
                     }
                 }
 
                 if (iter.current != .nil) {
-                    std.debug.print("Runtime error inside '{s}': too many arguments. Expected maximum {}.\n", .{ fn_name, max_capacity });
-                    return error.TooManyArguments;
+                    const extra_count = ListIter.init(iter.current).len();
+                    return context.fail(
+                        EvaluatorError.TypeError,
+                        "too many arguments (expected at most {d}, got {d} extra)",
+                        .{ max_capacity, extra_count },
+                    );
                 }
                 if (i < min_required) {
-                    std.debug.print("Runtime error inside '{s}': too few arguments. Expected at least {}, got {}.\n", .{ fn_name, min_required, i });
-                    return error.TooFewArguments;
+                    return context.fail(
+                        EvaluatorError.TypeError,
+                        "too few arguments (expected at least {d}, got {d})",
+                        .{ min_required, i },
+                    );
                 }
 
                 self.count = i;

@@ -10,6 +10,7 @@ pub const Dambda = nodes.Dambda;
 pub const Macro = nodes.Macro;
 
 pub const nil = helpers.nil;
+pub const nodeTypeName = helpers.nodeTypeName;
 pub const make = helpers.make;
 pub const makeObject = helpers.makeObject;
 pub const as = helpers.as;
