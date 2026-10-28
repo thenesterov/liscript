@@ -213,8 +213,7 @@ pub const Evaluator = struct {
                 var tail_ptr: *AstNode = &rest_vals;
 
                 while (vals_iter.next(.any)) |val| {
-                    const evaluated_val = try self.evaluate(val, environment_);
-                    const val_cons = try ast.makeObject(self.context.runtime_allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
+                    const val_cons = try ast.makeObject(self.context.runtime_allocator, .cons, .{ .car = val, .cdr = ast.nil });
 
                     tail_ptr.* = val_cons;
 
