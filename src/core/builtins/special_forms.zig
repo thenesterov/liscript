@@ -616,3 +616,27 @@ pub const Load = MakeSpecialForm("load", struct {
         return last_result;
     }
 }.exec);
+
+pub const Error = MakeSpecialForm("error", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "message", .mask = args_unpacker.ArgType.string },
+    };
+
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
+        _ = environment;
+
+        const shape = try args_unpacker.unpack(spec, "error", evaluator.context, body);
+
+        const boxed_message = shape.get("message");
+        const message = ast.unwrapObject(.string, boxed_message) catch unreachable;
+
+        evaluator.context.last_error_message = try std.mem.concat(
+            evaluator.context.runtime_allocator,
+            u8,
+            &[_][]const u8{ "RuntimeError: ", message },
+        );
+        return EvaluatorError.RuntimeError;
+    }
+}.exec);

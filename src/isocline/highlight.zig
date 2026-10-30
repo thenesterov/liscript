@@ -34,6 +34,7 @@ const keywords = [_][]const u8{
     "dambda",
     "racro",
     "macro",
+    "error",
     "...",
 };
 

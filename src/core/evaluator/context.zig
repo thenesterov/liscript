@@ -107,6 +107,7 @@ pub const EvaluatorContext = struct {
         try self.registerBuiltin(special_forms.Dambda);
         try self.registerBuiltin(special_forms.Racro);
         try self.registerBuiltin(special_forms.Load);
+        try self.registerBuiltin(special_forms.Error);
     }
 
     pub fn deinit(self: *EvaluatorContext) void {
