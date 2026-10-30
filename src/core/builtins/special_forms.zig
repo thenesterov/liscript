@@ -90,7 +90,7 @@ pub const TypeOf = MakeSpecialForm("typeof", struct {
 pub const Cons = MakeSpecialForm("cons", struct {
     const spec = [_]args_unpacker.Arg{
         .{ .name = "car", .mask = args_unpacker.ArgType.any },
-        .{ .name = "cdr", .mask = args_unpacker.ArgType.list },
+        .{ .name = "cdr", .mask = args_unpacker.ArgType.any },
     };
 
     pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
@@ -106,6 +106,14 @@ pub const Cons = MakeSpecialForm("cons", struct {
 
         const cdr = shape.get("cdr");
         const evaluated_cdr = try evaluator.evaluate(cdr, environment);
+
+        if (ast.asObject(.cons, evaluated_cdr) == null and ast.as(.nil, evaluated_cdr) == null) {
+            return evaluator.context.fail(
+                EvaluatorError.TypeError,
+                "argument 'cdr' expected cons or nil, got '{s}'",
+                .{ast.nodeTypeName(evaluated_cdr)},
+            );
+        }
 
         return ast.makeObject(runtime_allocator, .cons, .{ .car = evaluated_car, .cdr = evaluated_cdr });
     }
@@ -367,6 +375,8 @@ pub const Cond = MakeSpecialForm("cond", struct {
                 if (boolean.get()) {
                     return try evaluator.evaluate(then_expr, environment);
                 }
+            } else {
+                return evaluator.context.fail(EvaluatorError.TypeError, "condition must be a boolean, got '{s}'", .{ast.nodeTypeName(evaluated_cond)});
             }
         }
 
