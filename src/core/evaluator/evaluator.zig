@@ -64,6 +64,13 @@ pub const Evaluator = struct {
                     .{ast.nodeTypeName(head)},
                 );
             },
+            .symbol => |symbol| {
+                return self.context.fail(
+                    EvaluatorError.NameError,
+                    "name '{s}' is not defined",
+                    .{self.context.symbol_table.getName(symbol.getId())},
+                );
+            },
             else => return self.context.fail(
                 EvaluatorError.TypeError,
                 "cannot call non-function type '{s}'",
