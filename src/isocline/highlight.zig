@@ -35,6 +35,9 @@ const keywords = [_][]const u8{
     "racro",
     "macro",
     "error",
+    "assert",
+    "assert-eq",
+    "assert-error",
     "...",
 };
 

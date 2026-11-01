@@ -108,6 +108,9 @@ pub const EvaluatorContext = struct {
         try self.registerBuiltin(special_forms.Racro);
         try self.registerBuiltin(special_forms.Load);
         try self.registerBuiltin(special_forms.Error);
+        try self.registerBuiltin(special_forms.Assert);
+        try self.registerBuiltin(special_forms.AssertEq);
+        try self.registerBuiltin(special_forms.AssertError);
     }
 
     pub fn deinit(self: *EvaluatorContext) void {
@@ -136,6 +139,7 @@ pub const EvaluatorContext = struct {
             EvaluatorError.TypeError => self.setErrorMessage("TypeError: " ++ fmt, args),
             EvaluatorError.NameError => self.setErrorMessage("NameError: " ++ fmt, args),
             EvaluatorError.RuntimeError => self.setErrorMessage("RuntimeError: " ++ fmt, args),
+            EvaluatorError.AssertionError => self.setErrorMessage("AssertionError: " ++ fmt, args),
             EvaluatorError.ZeroDivisionError => self.setErrorMessage("ZeroDivisionError: " ++ fmt, args),
         }
         return err;

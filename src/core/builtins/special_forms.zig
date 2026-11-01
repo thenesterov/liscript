@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const ast = @import("../ast.zig");
+const predicates = @import("../builtins/predicates.zig");
 const args_unpacker = @import("../helpers/args_unpacker.zig");
 
 const SymbolTable = @import("../symbol_table.zig").SymbolTable;
@@ -643,5 +644,86 @@ pub const Error = MakeSpecialForm("error", struct {
             &[_][]const u8{ "RuntimeError: ", message },
         );
         return EvaluatorError.RuntimeError;
+    }
+}.exec);
+
+pub const Assert = MakeSpecialForm("assert", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "value", .mask = args_unpacker.ArgType.any },
+    };
+
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
+
+        const shape = try args_unpacker.unpack(spec, "assert", evaluator.context, body);
+
+        const boxed_value = try evaluator.evaluate(shape.get("value"), environment);
+        const value = ast.unwrap(.bool, boxed_value) catch return evaluator.context.fail(
+            EvaluatorError.AssertionError,
+            "expected truthy value, got '{s}'",
+            .{try boxed_value.repr(evaluator.context.runtime_allocator, evaluator.context.symbol_table)},
+        );
+
+        if (!value.get()) {
+            return evaluator.context.fail(EvaluatorError.AssertionError, "expected truthy value, got 'false'", .{});
+        }
+
+        return ast.nil;
+    }
+}.exec);
+
+pub const AssertEq = MakeSpecialForm("assert-eq", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "expected", .mask = args_unpacker.ArgType.any },
+        .{ .name = "actual", .mask = args_unpacker.ArgType.any },
+    };
+
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
+
+        const shape = try args_unpacker.unpack(spec, "assert-eq", evaluator.context, body);
+
+        const expected = try evaluator.evaluate(shape.get("expected"), environment);
+        const actual = try evaluator.evaluate(shape.get("actual"), environment);
+
+        const equal_pr = predicates.Equal.init(evaluator.context.runtime_allocator, &evaluator.context.symbol_table);
+        const boxed_compare_result = try predicates.Equal.exec(&equal_pr, evaluator, expected, actual);
+        const compare_result = ast.unwrap(.bool, boxed_compare_result) catch unreachable;
+
+        if (!compare_result.get()) {
+            return evaluator.context.fail(
+                EvaluatorError.AssertionError,
+                "values are not equal\n  expected: {s}\n  actual:   {s}",
+                .{
+                    try expected.repr(evaluator.context.runtime_allocator, evaluator.context.symbol_table),
+                    try actual.repr(evaluator.context.runtime_allocator, evaluator.context.symbol_table),
+                },
+            );
+        }
+
+        return ast.nil;
+    }
+}.exec);
+
+pub const AssertError = MakeSpecialForm("assert-error", struct {
+    const spec = [_]args_unpacker.Arg{
+        .{ .name = "value", .mask = args_unpacker.ArgType.any },
+    };
+
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
+
+        const shape = try args_unpacker.unpack(spec, "assert-error", evaluator.context, body);
+
+        const boxed_value = evaluator.evaluate(shape.get("value"), environment) catch return ast.nil;
+
+        return evaluator.context.fail(
+            EvaluatorError.AssertionError,
+            "expected error, got '{s}'",
+            .{try boxed_value.repr(evaluator.context.runtime_allocator, evaluator.context.symbol_table)},
+        );
     }
 }.exec);
