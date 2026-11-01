@@ -16,10 +16,10 @@
         (cons do body))))))
 (defracro defn (name args) (eval (defn-codegen 'name 'args '...)))
 
-(defn intersperse (e xs)
+(defn intersperse (v xs)
   (cond (nil? xs) nil
         (nil? (cdr xs)) xs
-        (cons (car xs) (cons e (intersperse e (cdr xs))))))
+        (cons (car xs) (cons v (intersperse v (cdr xs))))))
 
 (defn not (v) (= v false))
 
@@ -44,25 +44,78 @@
         (reduce f (f acc (car xs)) (cdr xs))))
 (def foldl reduce)
 
-(def inc (lambda (v) (+ v 1)))
-(def dec (lambda (v) (- v 1)))
+(defn foldr (f acc xs)
+  (cond (nil? xs) acc
+        (f (foldr f acc (cdr xs)) (car xs))))
 
-(def range
-  (lambda (from to)
-          (cond (> from to) nil
-                (cons from (range (+ 1 from) to)))))
+(defn iter (f xs)
+  (cond (nil? xs) nil
+        (do (f (car xs))
+            (iter f (cdr xs)))))
 
-(def take
-  (lambda (n lst)
-          (cond (<= n 0) nil
-          (nil? lst) nil
-          (cons (car lst) (take (- n 1) (cdr lst))))))
+(defn fmap (f xs)
+  (cond (list? xs) (cond (nil? xs) nil
+                         (cons (fmap f (car xs)) (fmap f (cdr xs))))
+        (f xs)))
+(def deep-map fmap)
 
-(def drop
-  (lambda (n lst)
-          (cond (<= n 0) lst
-          (nil? lst) nil
-          (drop (- n 1) (cdr lst)))))
+(defn inc (v) (+ v 1))
+(defn dec (v) (- v 1))
+
+(defn range (from to)
+  (cond (> from to) nil
+        (cons from (range (+ 1 from) to))))
+
+(defn take (n lst)
+  (cond (<= n 0) nil
+  (nil? lst) nil
+  (cons (car lst) (take (- n 1) (cdr lst)))))
+
+(defn drop (n lst)
+  (cond (<= n 0) lst
+  (nil? lst) nil
+  (drop (- n 1) (cdr lst))))
+
+(defn contains? (v xs)
+  (cond (nil? xs) false
+        (= v (car xs)) true
+        (contains? v (cdr xs))))
+
+(defn n-times (n f acc)
+  (cond (= n 0) acc
+        (n-times (- n 1) f (f acc))))
+
+(defn list-ref (i xs)
+  (cond (< i 0) (error "index less than 0")
+        (nil? xs) (error "index out of range")
+        (= i 0) (car xs)
+        (list-ref (- i 1) (cdr xs))))
+
+(defn init (len f)
+  (map f (range 0 (- len 1))))
+
+(defn repeat (len v)
+  (cond (= len 0) nil
+        (cons v (repeat (- len 1) v))))
+
+(defn append (xs ys)
+  (foldr (lambda (acc v) (cons v acc)) ys xs))
+
+(defn length (xs)
+  (reduce (lambda (acc v) (+ 1 acc)) 0 xs))
+
+(defn reverse (xs)
+  (reduce (lambda (acc v) (cons v acc)) nil xs))
+
+(defn all (f xs)
+  (cond (nil? xs) true
+        (f (car xs)) (all f (cdr xs))
+        false))
+
+(defn any (f xs)
+  (cond (nil? xs) false
+        (f (car xs)) true
+        (any f (cdr xs))))
 
 (defn t () (print "#t") true)
 (defn f () (print "#f") false)

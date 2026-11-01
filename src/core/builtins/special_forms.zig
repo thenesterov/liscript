@@ -80,6 +80,7 @@ pub const TypeOf = MakeSpecialForm("typeof", struct {
         const evaluated_arg = try evaluator.evaluate(arg, environment);
 
         const type_str = switch (evaluated_arg) {
+            .nil => "list",
             .object => if (ast.asObject(.cons, evaluated_arg) != null) "list" else "string",
             else => |node| @tagName(node),
         };
