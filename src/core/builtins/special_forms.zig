@@ -206,7 +206,8 @@ pub const Write = MakeSpecialForm("write", struct {
             if (ast.asObject(.string, evaluated_node)) |string| {
                 try writer.print("{s}", .{string});
             } else {
-                try evaluated_node.repr(symbol_table, writer);
+                const repr = try evaluated_node.repr(evaluator.context.runtime_allocator, symbol_table);
+                try writer.print("{s}", .{repr});
             }
         }
 
@@ -238,8 +239,8 @@ pub const Print = MakeSpecialForm("print", struct {
             if (ast.asObject(.string, evaluated_node)) |string| {
                 try writer.print("{s} ", .{string});
             } else {
-                try evaluated_node.repr(symbol_table, writer);
-                _ = try writer.write(" ");
+                const repr = try evaluated_node.repr(evaluator.context.runtime_allocator, symbol_table);
+                try writer.print("{s} ", .{repr});
             }
         }
 
@@ -619,18 +620,22 @@ pub const Load = MakeSpecialForm("load", struct {
 
 pub const Error = MakeSpecialForm("error", struct {
     const spec = [_]args_unpacker.Arg{
-        .{ .name = "message", .mask = args_unpacker.ArgType.string },
+        .{ .name = "message", .mask = args_unpacker.ArgType.any },
     };
 
     pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
-        _ = environment;
 
         const shape = try args_unpacker.unpack(spec, "error", evaluator.context, body);
 
-        const boxed_message = shape.get("message");
-        const message = ast.unwrapObject(.string, boxed_message) catch unreachable;
+        const boxed_message = try evaluator.evaluate(shape.get("message"), environment);
+        const message = ast.unwrapObject(.string, boxed_message) catch
+            return evaluator.context.fail(
+                EvaluatorError.TypeError,
+                "argument 'message' expected string, got '{s}'",
+                .{ast.nodeTypeName(boxed_message)},
+            );
 
         evaluator.context.last_error_message = try std.mem.concat(
             evaluator.context.runtime_allocator,

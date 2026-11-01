@@ -320,12 +320,10 @@ pub const Concat = struct {
     }
 
     pub fn exec(ptr: *const anyopaque, evaluator: *Evaluator, a: AstNode, b: AstNode) !AstNode {
-        _ = evaluator;
-
         const self: *const Concat = @ptrCast(@alignCast(ptr));
 
-        const a_string = ast.unwrapObject(.string, a) catch return OperatorError.CannotConcatWithNonString;
-        const b_string = ast.unwrapObject(.string, b) catch return OperatorError.CannotConcatWithNonString;
+        const a_string = ast.unwrapObject(.string, a) catch try a.repr(evaluator.context.runtime_allocator, evaluator.context.symbol_table);
+        const b_string = ast.unwrapObject(.string, b) catch try b.repr(evaluator.context.runtime_allocator, evaluator.context.symbol_table);
 
         return ast.makeObject(self.allocator, .string, try std.mem.concat(self.allocator, u8, &[_][]const u8{ a_string, b_string }));
     }

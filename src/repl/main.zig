@@ -39,7 +39,6 @@ pub fn main(init: std.process.Init) !void {
         _ = iter_arena.reset(.retain_capacity);
         const arena = iter_arena.allocator();
 
-        var stdout = Io.Writer.Allocating.init(arena);
         var parser = try context.parser(arena, input);
 
         const parsed = parser.parse(.{ .check_dungling_tokens = true }) catch |err| {
@@ -48,17 +47,14 @@ pub fn main(init: std.process.Init) !void {
         };
 
         const result = evaluator.evaluate(parsed, &context.environment) catch |err| {
-            try errors.handleEvaluateError(arena, err, context, &stdout);
+            try errors.handleEvaluateError(arena, err, context);
             continue;
         };
 
         try context.environment.def(context.symbols.last_result, result);
         if (liscript.ast.as(.nil, result) != null) continue;
 
-        try result.repr(context.symbol_table, &stdout.writer);
-        const repr = stdout.written();
-
-        try isocline.printf(allocator, "{s}\n", .{repr});
+        try isocline.printf(allocator, "{s}\n", .{try result.repr(context.runtime_allocator, context.symbol_table)});
     }
 
     try isocline.printf(allocator, "\n[b]toodles![/b]\n", .{});
@@ -80,7 +76,6 @@ fn isPromptEmpty(prompt: [:0]u8) bool {
 
 fn loadStd(evaluator: *Evaluator, iter_arena: *std.heap.ArenaAllocator) !void {
     const arena = iter_arena.allocator();
-    var stdout = Io.Writer.Allocating.init(arena);
 
     const load_expression = "(load \"std/std.ls\")";
 
@@ -91,7 +86,7 @@ fn loadStd(evaluator: *Evaluator, iter_arena: *std.heap.ArenaAllocator) !void {
     };
 
     _ = evaluator.evaluate(parsed, &evaluator.context.environment) catch |err| {
-        try errors.handleEvaluateError(arena, err, evaluator.context.*, &stdout);
+        try errors.handleEvaluateError(arena, err, evaluator.context.*);
         @panic("failed to load standard library");
     };
 }

@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const Allocator = std.mem.Allocator;
+
 const str = @import("str");
 
 const helpers = @import("helpers.zig");
@@ -20,8 +22,8 @@ pub const Float = packed struct {
         return @bitCast(self.bits);
     }
 
-    pub fn repr(self: Float, writer: *std.Io.Writer) !void {
-        try writer.print("{d}", .{self.get()});
+    pub fn repr(self: Float, allocator: Allocator) ![]const u8 {
+        return try std.fmt.allocPrint(allocator, "{d}", .{self.get()});
     }
 };
 
@@ -41,8 +43,8 @@ pub const Int = packed struct {
         return @bitCast(@as(u32, @truncate(self.bits)));
     }
 
-    pub fn repr(self: Int, writer: *std.Io.Writer) !void {
-        try writer.print("{d}", .{self.get()});
+    pub fn repr(self: Int, allocator: Allocator) ![]const u8 {
+        return try std.fmt.allocPrint(allocator, "{d}", .{self.get()});
     }
 };
 
@@ -55,9 +57,11 @@ pub const Nil = packed struct {
         return .{ .bits = TAG };
     }
 
-    pub fn repr(self: Nil, writer: *std.Io.Writer) !void {
+    pub fn repr(self: Nil, allocator: Allocator) ![]const u8 {
         _ = self;
-        try writer.print("nil", .{});
+        _ = allocator;
+
+        return "nil";
     }
 };
 
@@ -75,8 +79,8 @@ pub const Bool = packed struct {
         return (self.bits & 1) == 1;
     }
 
-    pub fn repr(self: Bool, writer: *std.Io.Writer) !void {
-        try writer.print("{}", .{self.get()});
+    pub fn repr(self: Bool, allocator: Allocator) ![]const u8 {
+        return try std.fmt.allocPrint(allocator, "{}", .{self.get()});
     }
 };
 
@@ -93,15 +97,14 @@ pub const Symbol = packed struct {
         return @truncate(self.bits);
     }
 
-    pub fn repr(self: Symbol, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
+    pub fn repr(self: Symbol, allocator: Allocator, symbol_table: SymbolTable) ![]const u8 {
         const name = symbol_table.getName(self.getId());
+
         if (std.mem.indexOfAny(u8, name, " \r\t\\\"") != null) {
-            try writer.print("@\"", .{});
-            try str.escape(name, writer);
-            try writer.print("\"", .{});
-        } else {
-            try writer.print("{s}", .{name});
+            return try std.fmt.allocPrint(allocator, "@\"{s}\"", .{try str.escape(allocator, name)});
         }
+
+        return try std.fmt.allocPrint(allocator, "{s}", .{name});
     }
 };
 
@@ -120,9 +123,9 @@ pub const ObjectPtr = packed struct {
         return @ptrFromInt(self.bits & MASK);
     }
 
-    pub fn repr(self: ObjectPtr, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
+    pub fn repr(self: ObjectPtr, allocator: Allocator, symbol_table: SymbolTable) ![]const u8 {
         const obj = self.getPtr(*const Object);
-        try obj.repr(symbol_table, writer);
+        return try obj.repr(allocator, symbol_table);
     }
 };
 
@@ -130,22 +133,27 @@ pub const Cons = struct {
     car: AstNode,
     cdr: AstNode,
 
-    pub fn repr(self: Cons, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
-        try writer.print("(", .{});
-        try self.car.repr(symbol_table, writer);
+    pub fn repr(self: Cons, allocator: Allocator, symbol_table: SymbolTable) ![]const u8 {
+        var repr_list: std.ArrayList(u8) = .empty;
+        defer repr_list.deinit(allocator);
+
+        try repr_list.appendSlice(allocator, "(");
+        try repr_list.appendSlice(allocator, try self.car.repr(allocator, symbol_table));
 
         var current_cdr = self.cdr;
         while (current_cdr != .nil) {
             const obj = current_cdr.object.getPtr(*const Object);
             const next_pair = obj.body.cons;
 
-            try writer.print(" ", .{});
-            try next_pair.car.repr(symbol_table, writer);
+            try repr_list.appendSlice(allocator, " ");
+            try repr_list.appendSlice(allocator, try next_pair.car.repr(allocator, symbol_table));
 
             current_cdr = next_pair.cdr;
         }
 
-        try writer.print(")", .{});
+        try repr_list.appendSlice(allocator, ")");
+
+        return try repr_list.toOwnedSlice(allocator);
     }
 };
 
@@ -154,17 +162,23 @@ pub const Lambda = struct {
     body: AstNode,
     env: *Environment,
 
-    pub fn repr(self: Lambda, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
-        try writer.print("(lambda ", .{});
+    pub fn repr(self: Lambda, allocator: Allocator, symbol_table: SymbolTable) ![]const u8 {
+        var repr_list: std.ArrayList(u8) = .empty;
+        defer repr_list.deinit(allocator);
+
+        try repr_list.appendSlice(allocator, "(lambda");
 
         if (helpers.as(.nil, self.args)) |_| {
-            try writer.print("()", .{});
+            try repr_list.appendSlice(allocator, "()");
         } else {
-            try self.args.repr(symbol_table, writer);
+            try repr_list.appendSlice(allocator, try self.args.repr(allocator, symbol_table));
         }
-        try writer.print(" ", .{});
-        try self.body.repr(symbol_table, writer);
-        try writer.print(")", .{});
+
+        try repr_list.appendSlice(allocator, " ");
+        try repr_list.appendSlice(allocator, try self.body.repr(allocator, symbol_table));
+        try repr_list.appendSlice(allocator, ")");
+
+        return try repr_list.toOwnedSlice(allocator);
     }
 };
 
@@ -172,17 +186,23 @@ pub const Dambda = struct {
     args: AstNode,
     body: AstNode,
 
-    pub fn repr(self: Dambda, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
-        try writer.print("(dambda ", .{});
+    pub fn repr(self: Dambda, allocator: Allocator, symbol_table: SymbolTable) ![]const u8 {
+        var repr_list: std.ArrayList(u8) = .empty;
+        defer repr_list.deinit(allocator);
+
+        try repr_list.appendSlice(allocator, "(dambda");
 
         if (helpers.as(.nil, self.args)) |_| {
-            try writer.print("()", .{});
+            try repr_list.appendSlice(allocator, "()");
         } else {
-            try self.args.repr(symbol_table, writer);
+            try repr_list.appendSlice(allocator, try self.args.repr(allocator, symbol_table));
         }
-        try writer.print(" ", .{});
-        try self.body.repr(symbol_table, writer);
-        try writer.print(")", .{});
+
+        try repr_list.appendSlice(allocator, " ");
+        try repr_list.appendSlice(allocator, try self.body.repr(allocator, symbol_table));
+        try repr_list.appendSlice(allocator, ")");
+
+        return try repr_list.toOwnedSlice(allocator);
     }
 };
 
@@ -190,17 +210,23 @@ pub const Racro = struct {
     args: AstNode,
     body: AstNode,
 
-    pub fn repr(self: Racro, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
-        try writer.print("(racro ", .{});
+    pub fn repr(self: Racro, allocator: Allocator, symbol_table: SymbolTable) ![]const u8 {
+        var repr_list: std.ArrayList(u8) = .empty;
+        defer repr_list.deinit(allocator);
+
+        try repr_list.appendSlice(allocator, "(dambda");
 
         if (helpers.as(.nil, self.args)) |_| {
-            try writer.print("()", .{});
+            try repr_list.appendSlice(allocator, "()");
         } else {
-            try self.args.repr(symbol_table, writer);
+            try repr_list.appendSlice(allocator, try self.args.repr(allocator, symbol_table));
         }
-        try writer.print(" ", .{});
-        try self.body.repr(symbol_table, writer);
-        try writer.print(")", .{});
+
+        try repr_list.appendSlice(allocator, " ");
+        try repr_list.appendSlice(allocator, try self.body.repr(allocator, symbol_table));
+        try repr_list.appendSlice(allocator, ")");
+
+        return try repr_list.toOwnedSlice(allocator);
     }
 };
 
@@ -213,14 +239,12 @@ pub const Object = struct {
         racro: Racro,
     },
 
-    pub fn repr(self: Object, symbol_table: SymbolTable, writer: *std.Io.Writer) !void {
+    pub fn repr(self: Object, allocator: Allocator, symbol_table: SymbolTable) ![]const u8 {
         return switch (self.body) {
-            .string => |string| {
-                try writer.print("\"", .{});
-                try str.escape(string, writer);
-                try writer.print("\"", .{});
+            .string => |string| res: {
+                break :res std.fmt.allocPrint(allocator, "\"{s}\"", .{try str.escape(allocator, string)});
             },
-            inline else => |obj| obj.repr(symbol_table, writer),
+            inline else => |obj| try obj.repr(allocator, symbol_table),
         };
     }
 };
@@ -230,9 +254,9 @@ pub const Builtin = union(enum) {
     predicate: Predicate,
     special_form: SpecialForm,
 
-    pub fn repr(self: Builtin, writer: *std.Io.Writer) !void {
+    pub fn repr(self: Builtin, allocator: Allocator) ![]const u8 {
         return switch (self) {
-            inline else => |builtin| writer.print("{s}", .{builtin.repr}),
+            inline else => |builtin| std.fmt.allocPrint(allocator, "{s}", .{builtin.repr}),
         };
     }
 };
@@ -267,11 +291,11 @@ pub const AstNode = union(enum) {
         }
     }
 
-    pub fn repr(self: AstNode, symbol_table: SymbolTable, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-        switch (self) {
-            .symbol => |sym| try sym.repr(symbol_table, writer),
-            .object => |obj_ptr| try obj_ptr.repr(symbol_table, writer),
-            inline else => |*x| try x.repr(writer),
-        }
+    pub fn repr(self: AstNode, allocator: Allocator, symbol_table: SymbolTable) Allocator.Error![]const u8 {
+        return switch (self) {
+            .symbol => |sym| try sym.repr(allocator, symbol_table),
+            .object => |obj_ptr| try obj_ptr.repr(allocator, symbol_table),
+            inline else => |*x| try x.repr(allocator),
+        };
     }
 };

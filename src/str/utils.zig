@@ -12,17 +12,22 @@ pub fn inludesChar(string: []const u8, char: u8) bool {
     return std.mem.indexOfScalar(u8, string, char) != null;
 }
 
-pub fn escape(raw_string: []const u8, writer: *std.Io.Writer) !void {
+pub fn escape(allocator: std.mem.Allocator, raw_string: []const u8) ![]const u8 {
+    var buffer: std.ArrayList(u8) = .empty;
+    defer buffer.deinit(allocator);
+
     for (raw_string) |char| {
         switch (char) {
-            '\n' => try writer.print("\\n", .{}),
-            '\r' => try writer.print("\\r", .{}),
-            '\t' => try writer.print("\\t", .{}),
-            '"' => try writer.print("\\\"", .{}),
-            '\\' => try writer.print("\\\\\\\\", .{}), // todo: isocline implementation detail leak
-            else => try writer.print("{c}", .{char}),
+            '\n' => try buffer.appendSlice(allocator, "\\n"),
+            '\r' => try buffer.appendSlice(allocator, "\\r"),
+            '\t' => try buffer.appendSlice(allocator, "\\t"),
+            '"' => try buffer.appendSlice(allocator, "\\\""),
+            '\\' => try buffer.appendSlice(allocator, "\\\\\\\\"), // todo: isocline implementation detail leak
+            else => try buffer.appendSlice(allocator, &[_]u8{char}),
         }
     }
+
+    return try buffer.toOwnedSlice(allocator);
 }
 
 pub fn unescape(allocator: std.mem.Allocator, escaped: []const u8) ![]const u8 {

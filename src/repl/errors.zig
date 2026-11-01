@@ -65,14 +65,12 @@ pub fn handleEvaluateError(
     allocator: Allocator,
     err: anyerror,
     context: EvaluatorContext,
-    stdout: *std.Io.Writer.Allocating,
 ) !void {
     if (context.last_error_message) |message| {
         try isocline.printf(allocator, "[firebrick]{s}\n", .{message});
 
         if (context.last_error_node) |node| {
-            try node.repr(context.symbol_table, &stdout.writer);
-            try isocline.printf(allocator, "[steelblue]error in:[/] [gray]{s}[/]\n\n", .{stdout.written()});
+            try isocline.printf(allocator, "[steelblue]error in:[/] [gray]{s}[/]\n\n", .{try node.repr(allocator, context.symbol_table)});
         }
     } else {
         try isocline.printf(allocator, "[firebrick]Unexpected error: {s}[/]\n\n", .{@errorName(err)});
