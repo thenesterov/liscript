@@ -101,6 +101,11 @@
 (defn append (xs ys)
   (foldr (lambda (acc v) (cons v acc)) ys xs))
 
+(defn maybe-append (x y)
+  (cond (= x false) false
+        (= y false) false
+        (append x y)))
+
 (defn length (xs)
   (reduce (lambda (acc v) (+ 1 acc)) 0 xs))
 
@@ -116,6 +121,30 @@
   (cond (nil? xs) false
         (f (car xs)) true
         (any f (cdr xs))))
+
+(defn pattern-matching-codegen (pattern v)
+  (cond (symbol? pattern) (cond (= pattern '_) nil (list pattern (list quote v)))
+        (list? pattern) (cond (not (list? v)) false
+                              (and (nil? pattern) (nil? v)) nil
+                              (nil? pattern) false
+                              (= '& (car pattern)) (cond (nil? (cdr pattern)) (error "expected symbol after '&'")
+                                                         (not (nil? (cdr (cdr pattern)))) (error "expected 1 symbol after '&'")
+                                                         (not (symbol? (car (cdr pattern)))) (error (++ "expected symbol after '&', got " (car (cdr pattern))))
+                                                         (= (car (cdr pattern)) '_) nil
+                                                         (list (car (cdr pattern)) (list quote v)))
+                              (nil? v) false
+                              (maybe-append (pattern-matching-codegen (car pattern) (car v)) (pattern-matching-codegen (cdr pattern) (cdr v))))
+        (= pattern v) nil
+        false))
+
+(defn pattern-matching-final (pattern v)
+  (def code (pattern-matching-codegen pattern v))
+  (cond (= code false) false
+        (nil? code) true
+        (list do (cons def code) true)))
+
+(defracro pattern-matching (pattern v) (eval (pattern-matching-final 'pattern v)))
+(def pm pattern-matching)
 
 (defn t () (print "#t") true)
 (defn f () (print "#f") false)
