@@ -20,6 +20,8 @@
           buildInputs = with pkgs; [
             zig
             zls
+
+            perf
           ];
 
           shellHook = ''
