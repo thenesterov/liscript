@@ -166,7 +166,7 @@ pub const Lambda = struct {
         var repr_list: std.ArrayList(u8) = .empty;
         defer repr_list.deinit(allocator);
 
-        try repr_list.appendSlice(allocator, "(lambda");
+        try repr_list.appendSlice(allocator, "(lambda ");
 
         if (helpers.as(.nil, self.args)) |_| {
             try repr_list.appendSlice(allocator, "()");
@@ -190,7 +190,7 @@ pub const Dambda = struct {
         var repr_list: std.ArrayList(u8) = .empty;
         defer repr_list.deinit(allocator);
 
-        try repr_list.appendSlice(allocator, "(dambda");
+        try repr_list.appendSlice(allocator, "(dambda ");
 
         if (helpers.as(.nil, self.args)) |_| {
             try repr_list.appendSlice(allocator, "()");
@@ -214,7 +214,7 @@ pub const Racro = struct {
         var repr_list: std.ArrayList(u8) = .empty;
         defer repr_list.deinit(allocator);
 
-        try repr_list.appendSlice(allocator, "(dambda");
+        try repr_list.appendSlice(allocator, "(racro ");
 
         if (helpers.as(.nil, self.args)) |_| {
             try repr_list.appendSlice(allocator, "()");
@@ -230,6 +230,19 @@ pub const Racro = struct {
     }
 };
 
+pub const TailCall = struct {
+    expr: AstNode,
+    env: *Environment,
+
+    pub fn repr(self: TailCall, allocator: Allocator, symbol_table: SymbolTable) ![]const u8 {
+        _ = self;
+        _ = allocator;
+        _ = symbol_table;
+
+        return "<tail-call>";
+    }
+};
+
 pub const Object = struct {
     body: union(enum) {
         cons: Cons,
@@ -237,6 +250,7 @@ pub const Object = struct {
         lambda: Lambda,
         dambda: Dambda,
         racro: Racro,
+        tail_call: TailCall,
     },
 
     pub fn repr(self: Object, allocator: Allocator, symbol_table: SymbolTable) ![]const u8 {
@@ -284,6 +298,7 @@ pub const AstNode = union(enum) {
                         sf.args.deinit(allocator);
                         sf.body.deinit(allocator);
                     },
+                    .tail_call => {},
                 }
                 allocator.destroy(object_ptr);
             },

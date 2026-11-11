@@ -7,6 +7,7 @@ const args_unpacker = @import("../helpers/args_unpacker.zig");
 const SymbolTable = @import("../symbol_table.zig").SymbolTable;
 const Environment = @import("../environment.zig").Environment;
 const Evaluator = @import("../evaluator.zig").Evaluator;
+const EvaluatorMode = @import("../evaluator.zig").EvaluatorMode;
 const EvaluatorError = @import("../evaluator.zig").EvaluatorError;
 const Lexer = @import("../lexer.zig").Lexer;
 const Parser = @import("../parser.zig").Parser;
@@ -19,7 +20,7 @@ const Object = ast.Object;
 pub const SpecialForm = struct {
     ptr: *const anyopaque,
     repr: []const u8,
-    exec_fn: *const fn (ptr: *const anyopaque, environment: *Environment, evaluator: *Evaluator, body: AstNode) anyerror!AstNode,
+    exec_fn: *const fn (ptr: *const anyopaque, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) anyerror!AstNode,
 };
 
 pub fn MakeSpecialForm(comptime name: []const u8, comptime body_fn: anytype) type {
@@ -40,9 +41,9 @@ pub fn MakeSpecialForm(comptime name: []const u8, comptime body_fn: anytype) typ
             try environment.def(self.symbol, .{ .builtin = .{ .special_form = self.specialForm() } });
         }
 
-        fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: *Evaluator, body: AstNode) anyerror!AstNode {
+        fn exec(ptr: *const anyopaque, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) anyerror!AstNode {
             const self: *const @This() = @ptrCast(@alignCast(ptr));
-            return try body_fn(self, environment, evaluator, body);
+            return try body_fn(self, environment, evaluator, mode, body);
         }
     };
 }
@@ -52,10 +53,11 @@ pub const Quote = MakeSpecialForm("quote", struct {
         .{ .name = "arg", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
         _ = environment;
+        _ = mode;
 
         const shape = try args_unpacker.unpack(spec, "quote", evaluator.context, body);
 
@@ -68,16 +70,17 @@ pub const TypeOf = MakeSpecialForm("typeof", struct {
         .{ .name = "arg", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const runtime_allocator = evaluator.context.runtime_allocator;
 
         const shape = try args_unpacker.unpack(spec, "typeof", evaluator.context, body);
 
         const arg = shape.get("arg");
-        const evaluated_arg = try evaluator.evaluate(arg, environment);
+        const evaluated_arg = try evaluator.evaluate(arg, environment, .strict);
 
         const type_str = switch (evaluated_arg) {
             .nil => "list",
@@ -95,19 +98,20 @@ pub const Cons = MakeSpecialForm("cons", struct {
         .{ .name = "cdr", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const runtime_allocator = evaluator.context.runtime_allocator;
 
         const shape = try args_unpacker.unpack(spec, "cons", evaluator.context, body);
 
         const car = shape.get("car");
-        const evaluated_car = try evaluator.evaluate(car, environment);
+        const evaluated_car = try evaluator.evaluate(car, environment, .strict);
 
         const cdr = shape.get("cdr");
-        const evaluated_cdr = try evaluator.evaluate(cdr, environment);
+        const evaluated_cdr = try evaluator.evaluate(cdr, environment, .strict);
 
         if (ast.asObject(.cons, evaluated_cdr) == null and ast.as(.nil, evaluated_cdr) == null) {
             return evaluator.context.fail(
@@ -129,14 +133,15 @@ pub const Car = MakeSpecialForm("car", struct {
         .{ .name = "arg", .mask = args_unpacker.ArgType.list },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const runtime_allocator = evaluator.context.runtime_allocator;
 
         const unevaluated_shape = try args_unpacker.unpack(unevaluatede_spec, "car", evaluator.context, body);
-        const evaluated_arg = try evaluator.evaluate(unevaluated_shape.get("unevaluated_arg"), environment);
+        const evaluated_arg = try evaluator.evaluate(unevaluated_shape.get("unevaluated_arg"), environment, .strict);
 
         const wrapped_arg = try ast.makeObject(runtime_allocator, .cons, .{ .car = evaluated_arg, .cdr = ast.nil });
 
@@ -162,14 +167,15 @@ pub const Cdr = MakeSpecialForm("cdr", struct {
         .{ .name = "arg", .mask = args_unpacker.ArgType.list },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const runtime_allocator = evaluator.context.runtime_allocator;
 
         const unevaluated_shape = try args_unpacker.unpack(unevaluatede_spec, "cdr", evaluator.context, body);
-        const evaluated_arg = try evaluator.evaluate(unevaluated_shape.get("unevaluated_arg"), environment);
+        const evaluated_arg = try evaluator.evaluate(unevaluated_shape.get("unevaluated_arg"), environment, .strict);
 
         const wrapped_arg = try ast.makeObject(runtime_allocator, .cons, .{ .car = evaluated_arg, .cdr = ast.nil });
 
@@ -192,9 +198,10 @@ pub const Write = MakeSpecialForm("write", struct {
         .{ .name = "args", .mask = args_unpacker.ArgType.any, .is_rest = true },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const writer = evaluator.context.io.writer();
         const symbol_table = evaluator.context.symbol_table;
@@ -203,7 +210,7 @@ pub const Write = MakeSpecialForm("write", struct {
         var args_iter = ListIter.init(shape.get("args"));
 
         while (args_iter.next(.any)) |node| {
-            const evaluated_node = try evaluator.evaluate(node, environment);
+            const evaluated_node = try evaluator.evaluate(node, environment, .strict);
 
             if (ast.asObject(.string, evaluated_node)) |string| {
                 try writer.print("{s}", .{string});
@@ -224,9 +231,10 @@ pub const Print = MakeSpecialForm("print", struct {
         .{ .name = "args", .mask = args_unpacker.ArgType.any, .is_rest = true },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const writer = evaluator.context.io.writer();
         const symbol_table = evaluator.context.symbol_table;
@@ -236,7 +244,7 @@ pub const Print = MakeSpecialForm("print", struct {
         var args_iter = ListIter.init(shape.get("args"));
 
         while (args_iter.next(.any)) |node| {
-            const evaluated_node = try evaluator.evaluate(node, environment);
+            const evaluated_node = try evaluator.evaluate(node, environment, .strict);
 
             if (ast.asObject(.string, evaluated_node)) |string| {
                 try writer.print("{s} ", .{string});
@@ -258,10 +266,11 @@ pub const Input = MakeSpecialForm("input", struct {
         .{ .name = "prompt", .mask = args_unpacker.ArgType.string },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
         _ = environment;
+        _ = mode;
 
         const writer = evaluator.context.io.writer();
         const reader = evaluator.context.io.reader();
@@ -287,10 +296,11 @@ pub const Read = MakeSpecialForm("read", struct {
         .{ .name = "prompt", .mask = args_unpacker.ArgType.string },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
         _ = environment;
+        _ = mode;
 
         const writer = evaluator.context.io.writer();
         const reader = evaluator.context.io.reader();
@@ -315,38 +325,45 @@ pub const Read = MakeSpecialForm("read", struct {
 
 pub const Symbol = MakeSpecialForm("symbol", struct {
     const spec = [_]args_unpacker.Arg{
-        .{ .name = "arg", .mask = args_unpacker.ArgType.string },
+        .{ .name = "arg", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
-        _ = environment;
+        _ = mode;
 
         const symbol_table = &evaluator.context.symbol_table;
 
         const shape = try args_unpacker.unpack(spec, "symbol", evaluator.context, body);
 
-        const boxed_arg = shape.get("arg");
-        const arg = ast.unwrapObject(.string, boxed_arg) catch unreachable;
+        const evaluated_arg = try evaluator.evaluate(shape.get("arg"), environment, .strict);
 
-        return ast.make(.symbol, try symbol_table.insert(arg));
+        if (ast.asObject(.string, evaluated_arg)) |string| {
+            return ast.make(.symbol, try symbol_table.insert(string));
+        } else {
+            return evaluator.context.fail(EvaluatorError.TypeError, "arg must be a string, got '{s}'", .{ast.nodeTypeName(evaluated_arg)});
+        }
     }
 }.exec);
 
 pub const Do = MakeSpecialForm("do", struct {
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         var iter = ListIter.init(body);
-        var result: AstNode = ast.nil;
+        if (iter.current == .nil) return ast.nil;
 
-        while (iter.next(.any)) |elem| {
-            result = try evaluator.evaluate(elem, environment);
+        while (true) {
+            const elem = iter.next(.any).?;
+            if (iter.current == .nil) {
+                return try evaluator.evaluate(elem, environment, .lazy);
+            } else {
+                _ = try evaluator.evaluate(elem, environment, .strict);
+            }
         }
-
-        return result;
     }
 }.exec);
 
@@ -355,9 +372,10 @@ pub const Cond = MakeSpecialForm("cond", struct {
         .{ .name = "clauses", .mask = args_unpacker.ArgType.any, .is_rest = true },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const shape = try args_unpacker.unpack(spec, "cond", evaluator.context, body);
 
@@ -367,16 +385,16 @@ pub const Cond = MakeSpecialForm("cond", struct {
             const cond_expr = iter.next(.any).?;
 
             if (iter.current == .nil) {
-                return try evaluator.evaluate(cond_expr, environment);
+                return try evaluator.evaluate(cond_expr, environment, .lazy);
             }
 
             const then_expr = iter.next(.any).?;
 
-            const evaluated_cond = try evaluator.evaluate(cond_expr, environment);
+            const evaluated_cond = try evaluator.evaluate(cond_expr, environment, .strict);
 
             if (ast.as(.bool, evaluated_cond)) |boolean| {
                 if (boolean.get()) {
-                    return try evaluator.evaluate(then_expr, environment);
+                    return try evaluator.evaluate(then_expr, environment, .lazy);
                 }
             } else {
                 return evaluator.context.fail(EvaluatorError.TypeError, "condition must be a boolean, got '{s}'", .{ast.nodeTypeName(evaluated_cond)});
@@ -392,16 +410,17 @@ pub const Eval = MakeSpecialForm("eval", struct {
         .{ .name = "arg", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const shape = try args_unpacker.unpack(spec, "eval", evaluator.context, body);
 
         const arg = shape.get("arg");
 
-        const evaluated_arg = try evaluator.evaluate(arg, environment);
-        return try evaluator.evaluate(evaluated_arg, environment);
+        const evaluated_arg = try evaluator.evaluate(arg, environment, .strict);
+        return try evaluator.evaluate(evaluated_arg, environment, .lazy);
     }
 }.exec);
 
@@ -410,9 +429,10 @@ pub const Def = MakeSpecialForm("def", struct {
         .{ .name = "args", .mask = args_unpacker.ArgType.any, .is_rest = true, .require_even = true },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const shape = try args_unpacker.unpack(spec, "def", evaluator.context, body);
         const args = shape.get("args");
@@ -422,26 +442,20 @@ pub const Def = MakeSpecialForm("def", struct {
         var iter = ListIter.init(args);
 
         while (iter.current != .nil) {
-            const boxed_symbol = iter.next(.symbol) orelse {
-                if (ast.asObject(.cons, iter.current)) |cons| {
-                    return evaluator.context.fail(
-                        EvaluatorError.TypeError,
-                        "'def' expected a symbol for the name, got '{s}'",
-                        .{ast.nodeTypeName(cons.car)},
-                    );
-                } else {
-                    return evaluator.context.fail(
-                        EvaluatorError.TypeError,
-                        "'def' expected a symbol for the name, got '{s}'",
-                        .{ast.nodeTypeName(iter.current)},
-                    );
-                }
-            };
+            const boxed_name = iter.next(.any) orelse unreachable;
+
+            var symbol: ast.Symbol = undefined;
+            if (ast.as(.symbol, boxed_name)) |sym| {
+                symbol = sym;
+            } else {
+                const evaluated_name = try evaluator.evaluate(boxed_name, environment, .strict);
+                symbol = ast.unwrap(.symbol, evaluated_name) catch {
+                    return evaluator.context.fail(EvaluatorError.TypeError, "'def' expected a symbol for the name, got '{s}'", .{ast.nodeTypeName(evaluated_name)});
+                };
+            }
 
             const boxed_value = iter.next(.any).?;
-
-            const symbol = try ast.unwrap(.symbol, boxed_symbol);
-            const value = try evaluator.evaluate(boxed_value, environment);
+            const value = try evaluator.evaluate(boxed_value, environment, .strict);
 
             try environment.def(symbol, value);
         }
@@ -455,9 +469,10 @@ pub const Set = MakeSpecialForm("set!", struct {
         .{ .name = "args", .mask = args_unpacker.ArgType.any, .is_rest = true, .require_even = true },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const shape = try args_unpacker.unpack(spec, "set!", evaluator.context, body);
         const args = shape.get("args");
@@ -485,7 +500,7 @@ pub const Set = MakeSpecialForm("set!", struct {
             const boxed_value = iter.next(.any).?;
 
             const symbol = try ast.unwrap(.symbol, boxed_symbol);
-            const value = try evaluator.evaluate(boxed_value, environment);
+            const value = try evaluator.evaluate(boxed_value, environment, .strict);
 
             environment.set(symbol, value) catch {
                 return evaluator.context.fail(
@@ -506,9 +521,10 @@ pub const Lambda = MakeSpecialForm("lambda", struct {
         .{ .name = "body", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const runtime_allocator = evaluator.context.runtime_allocator;
 
@@ -527,10 +543,11 @@ pub const Dambda = MakeSpecialForm("dambda", struct {
         .{ .name = "body", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
         _ = environment;
+        _ = mode;
 
         const runtime_allocator = evaluator.context.runtime_allocator;
 
@@ -549,10 +566,11 @@ pub const Racro = MakeSpecialForm("racro", struct {
         .{ .name = "body", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
         _ = environment;
+        _ = mode;
 
         const runtime_allocator = evaluator.context.runtime_allocator;
 
@@ -570,9 +588,10 @@ pub const Load = MakeSpecialForm("load", struct {
         .{ .name = "path", .mask = args_unpacker.ArgType.string },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const shape = try args_unpacker.unpack(spec, "load", evaluator.context, body);
 
@@ -611,7 +630,7 @@ pub const Load = MakeSpecialForm("load", struct {
                 );
             };
 
-            last_result = evaluator.evaluate(expr, environment) catch |err| {
+            last_result = evaluator.evaluate(expr, environment, .strict) catch |err| {
                 return err;
             };
         }
@@ -625,13 +644,14 @@ pub const Error = MakeSpecialForm("error", struct {
         .{ .name = "message", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const shape = try args_unpacker.unpack(spec, "error", evaluator.context, body);
 
-        const boxed_message = try evaluator.evaluate(shape.get("message"), environment);
+        const boxed_message = try evaluator.evaluate(shape.get("message"), environment, .strict);
         const message = ast.unwrapObject(.string, boxed_message) catch
             return evaluator.context.fail(
                 EvaluatorError.TypeError,
@@ -653,13 +673,14 @@ pub const Assert = MakeSpecialForm("assert", struct {
         .{ .name = "value", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const shape = try args_unpacker.unpack(spec, "assert", evaluator.context, body);
 
-        const boxed_value = try evaluator.evaluate(shape.get("value"), environment);
+        const boxed_value = try evaluator.evaluate(shape.get("value"), environment, .strict);
         const value = ast.unwrap(.bool, boxed_value) catch return evaluator.context.fail(
             EvaluatorError.AssertionError,
             "expected truthy value, got '{s}'",
@@ -680,14 +701,15 @@ pub const AssertEq = MakeSpecialForm("assert-eq", struct {
         .{ .name = "actual", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const shape = try args_unpacker.unpack(spec, "assert-eq", evaluator.context, body);
 
-        const expected = try evaluator.evaluate(shape.get("expected"), environment);
-        const actual = try evaluator.evaluate(shape.get("actual"), environment);
+        const expected = try evaluator.evaluate(shape.get("expected"), environment, .strict);
+        const actual = try evaluator.evaluate(shape.get("actual"), environment, .strict);
 
         const equal_pr = predicates.Equal.init(evaluator.context.runtime_allocator, &evaluator.context.symbol_table);
         const boxed_compare_result = try predicates.Equal.exec(&equal_pr, evaluator, expected, actual);
@@ -713,13 +735,14 @@ pub const AssertError = MakeSpecialForm("assert-error", struct {
         .{ .name = "value", .mask = args_unpacker.ArgType.any },
     };
 
-    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, body: AstNode) !AstNode {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
         const this = @as(@TypeOf(self), self);
         _ = this;
+        _ = mode;
 
         const shape = try args_unpacker.unpack(spec, "assert-error", evaluator.context, body);
 
-        const boxed_value = evaluator.evaluate(shape.get("value"), environment) catch return ast.nil;
+        const boxed_value = evaluator.evaluate(shape.get("value"), environment, .strict) catch return ast.nil;
 
         return evaluator.context.fail(
             EvaluatorError.AssertionError,

@@ -46,7 +46,7 @@ pub fn main(init: std.process.Init) !void {
             continue;
         };
 
-        const result = evaluator.evaluate(parsed, &context.environment) catch |err| {
+        const result = evaluator.evaluate(parsed, &context.environment, .strict) catch |err| {
             try errors.handleEvaluateError(arena, err, context);
             continue;
         };
@@ -85,7 +85,7 @@ fn loadStd(evaluator: *Evaluator, iter_arena: *std.heap.ArenaAllocator) !void {
         @panic("failed to parse standard library");
     };
 
-    _ = evaluator.evaluate(parsed, &evaluator.context.environment) catch |err| {
+    _ = evaluator.evaluate(parsed, &evaluator.context.environment, .strict) catch |err| {
         try errors.handleEvaluateError(arena, err, evaluator.context.*);
         @panic("failed to load standard library");
     };

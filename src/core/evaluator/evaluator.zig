@@ -13,6 +13,7 @@ const Predicate = @import("../builtins/predicates.zig").Predicate;
 const ListIter = @import("../helpers/list_iter.zig").ListIterator;
 const EvaluatorContext = @import("../evaluator/context.zig").EvaluatorContext;
 const EvaluatorError = @import("errors.zig").EvaluatorError;
+const EvaluatorMode = @import("../evaluator/mode.zig").EvaluatorMode;
 
 pub const Evaluator = struct {
     context: *EvaluatorContext,
@@ -21,22 +22,44 @@ pub const Evaluator = struct {
         return .{ .context = context };
     }
 
-    pub fn evaluate(self: *Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
-        return self.evaluateInner(node, environment_) catch |err| {
-            if (self.context.last_error_node == null) {
-                self.context.setErrorNode(node);
+    pub fn evaluate(self: *Evaluator, node: AstNode, environment_: *Environment, mode: EvaluatorMode) anyerror!AstNode {
+        if (mode == .lazy) {
+            return self.evaluateInner(node, environment_, mode) catch |err| {
+                if (self.context.last_error_node == null) {
+                    self.context.setErrorNode(node);
+                }
+                return err;
+            };
+        }
+
+        var current_node = node;
+        var current_env = environment_;
+
+        while (true) {
+            const out = self.evaluateInner(current_node, current_env, mode) catch |err| {
+                if (self.context.last_error_node == null) {
+                    self.context.setErrorNode(current_node);
+                }
+                return err;
+            };
+
+            if (ast.asObject(.tail_call, out)) |tail_call| {
+                current_node = tail_call.expr;
+                current_env = tail_call.env;
+                continue;
             }
-            return err;
-        };
+
+            return out;
+        }
     }
 
-    fn evaluateInner(self: *Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
+    fn evaluateInner(self: *Evaluator, node: AstNode, environment_: *Environment, mode: EvaluatorMode) anyerror!AstNode {
         return switch (node) {
             .symbol => |symbol| environment_.get(symbol),
             .object => |object| {
                 const object_ptr = object.getPtr(*const Object);
                 return switch (object_ptr.body) {
-                    .cons => |cons| try self.evaluateList(cons, environment_),
+                    .cons => |cons| try self.evaluateList(cons, environment_, mode),
                     .string => node,
                     else => node,
                 };
@@ -45,19 +68,19 @@ pub const Evaluator = struct {
         };
     }
 
-    fn evaluateList(self: *Evaluator, cons: ast.Cons, environment_: *Environment) anyerror!AstNode {
-        const head = try self.evaluate(cons.car, environment_);
+    fn evaluateList(self: *Evaluator, cons: ast.Cons, environment_: *Environment, mode: EvaluatorMode) anyerror!AstNode {
+        const head = try self.evaluate(cons.car, environment_, .strict);
 
         return switch (head) {
             .builtin => |builtin| switch (builtin) {
-                .operator => |operator| self.foldOperator(operator, cons.cdr, environment_),
-                .predicate => |predicate| self.foldPredicate(predicate, cons.cdr, environment_),
-                .special_form => |special_form| special_form.exec_fn(special_form.ptr, environment_, self, cons.cdr),
+                .operator => |operator| self.foldOperator(operator, cons.cdr, environment_, mode),
+                .predicate => |predicate| self.foldPredicate(predicate, cons.cdr, environment_, mode),
+                .special_form => |special_form| special_form.exec_fn(special_form.ptr, environment_, self, mode, cons.cdr),
             },
             .object => res: {
-                if (ast.asObject(.lambda, head)) |lambda| break :res self.callLambda(lambda, cons, environment_);
-                if (ast.asObject(.dambda, head)) |dambda| break :res self.callDambda(dambda, cons, environment_);
-                if (ast.asObject(.racro, head)) |racro| break :res self.callRacro(racro, cons, environment_);
+                if (ast.asObject(.lambda, head)) |lambda| break :res self.callLambda(lambda, cons, environment_, mode);
+                if (ast.asObject(.dambda, head)) |dambda| break :res self.callDambda(dambda, cons, environment_, mode);
+                if (ast.asObject(.racro, head)) |racro| break :res self.callRacro(racro, cons, environment_, mode);
                 return self.context.fail(
                     EvaluatorError.TypeError,
                     "cannot call non-function type '{s}'",
@@ -79,7 +102,9 @@ pub const Evaluator = struct {
         };
     }
 
-    fn callLambda(self: *Evaluator, lambda: ast.Lambda, cons: ast.Cons, environment_: *Environment) !AstNode {
+    fn callLambda(self: *Evaluator, lambda: ast.Lambda, cons: ast.Cons, environment_: *Environment, mode: EvaluatorMode) !AstNode {
+        _ = mode;
+
         const new_env_ptr = try self.context.runtime_allocator.create(Environment);
         new_env_ptr.* = Environment.init(self.context.runtime_allocator, lambda.env);
 
@@ -92,7 +117,7 @@ pub const Evaluator = struct {
                 var tail_ptr: *AstNode = &rest_vals;
 
                 while (vals_iter.next(.any)) |val| {
-                    const evaluated_val = try self.evaluate(val, environment_);
+                    const evaluated_val = try self.evaluate(val, environment_, .strict);
                     const val_cons = try ast.makeObject(self.context.runtime_allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
 
                     tail_ptr.* = val_cons;
@@ -138,15 +163,20 @@ pub const Evaluator = struct {
             };
             const raw_val_node = vals_iter.next(.any) orelse break;
 
-            const evaluated_val = try self.evaluate(raw_val_node, environment_);
+            const evaluated_val = try self.evaluate(raw_val_node, environment_, .strict);
 
             try new_env_ptr.def(sym_node.symbol, evaluated_val);
         }
 
-        return try self.evaluate(lambda.body, new_env_ptr);
+        return try ast.makeObject(self.context.runtime_allocator, .tail_call, .{
+            .expr = lambda.body,
+            .env = new_env_ptr,
+        });
     }
 
-    fn callDambda(self: *Evaluator, dambda: ast.Dambda, cons: ast.Cons, environment_: *Environment) !AstNode {
+    fn callDambda(self: *Evaluator, dambda: ast.Dambda, cons: ast.Cons, environment_: *Environment, mode: EvaluatorMode) !AstNode {
+        _ = mode;
+
         const new_env_ptr = try self.context.runtime_allocator.create(Environment);
         new_env_ptr.* = Environment.init(self.context.runtime_allocator, environment_);
 
@@ -162,7 +192,7 @@ pub const Evaluator = struct {
                 var tail_ptr: *AstNode = &rest_vals;
 
                 while (vals_iter.next(.any)) |val| {
-                    const evaluated_val = try self.evaluate(val, environment_);
+                    const evaluated_val = try self.evaluate(val, environment_, .strict);
                     const val_cons = try ast.makeObject(self.context.runtime_allocator, .cons, .{ .car = evaluated_val, .cdr = ast.nil });
 
                     tail_ptr.* = val_cons;
@@ -198,15 +228,17 @@ pub const Evaluator = struct {
             };
             const raw_val_node = vals_iter.next(.any) orelse break;
 
-            const evaluated_val = try self.evaluate(raw_val_node, environment_);
+            const evaluated_val = try self.evaluate(raw_val_node, environment_, .strict);
 
             try new_env_ptr.def(sym_node.symbol, evaluated_val);
         }
 
-        return try self.evaluate(dambda.body, new_env_ptr);
+        return try self.evaluate(dambda.body, new_env_ptr, .lazy);
     }
 
-    fn callRacro(self: *Evaluator, racro: ast.Racro, cons: ast.Cons, environment_: *Environment) !AstNode {
+    fn callRacro(self: *Evaluator, racro: ast.Racro, cons: ast.Cons, environment_: *Environment, mode: EvaluatorMode) !AstNode {
+        _ = mode;
+
         const new_env_ptr = try self.context.runtime_allocator.create(Environment);
         new_env_ptr.* = Environment.init(self.context.runtime_allocator, null);
         new_env_ptr.global = new_env_ptr;
@@ -268,13 +300,12 @@ pub const Evaluator = struct {
             try new_env_ptr.def(arg.symbol, val);
         }
 
-        return try self.evaluate(try self.racroExpand(racro.body, new_env_ptr), environment_);
+        return try self.evaluate(try self.racroExpand(racro.body, new_env_ptr), environment_, .lazy);
     }
 
     fn racroExpand(self: *Evaluator, node: AstNode, environment_: *Environment) anyerror!AstNode {
         return switch (node) {
             .symbol => |symbol| environment_.get(symbol),
-
             .object => |object| res: {
                 const object_ptr = object.getPtr(*const Object);
                 break :res switch (object_ptr.body) {
@@ -293,7 +324,8 @@ pub const Evaluator = struct {
         };
     }
 
-    fn foldOperator(self: *Evaluator, operator: Operator, cdr: AstNode, environment_: *Environment) !AstNode {
+    fn foldOperator(self: *Evaluator, operator: Operator, cdr: AstNode, environment_: *Environment, mode: EvaluatorMode) !AstNode {
+        _ = mode;
         if (ast.as(.nil, cdr) != null) return self.context.fail(
             EvaluatorError.TypeError,
             "operator '{s}' requires at least 1 argument",
@@ -302,13 +334,13 @@ pub const Evaluator = struct {
 
         const args = try ast.unwrapObject(.cons, cdr);
 
-        var operand_1 = try self.evaluate(args.car, environment_);
+        var operand_1 = try self.evaluate(args.car, environment_, .strict);
         var rest = args.cdr;
 
         while (ast.as(.nil, rest) == null) {
             const rest_cons = try ast.unwrapObject(.cons, rest);
 
-            const operand_2 = try self.evaluate(rest_cons.car, environment_);
+            const operand_2 = try self.evaluate(rest_cons.car, environment_, .strict);
             operand_1 = try operator.exec_fn(operator.ptr, self, operand_1, operand_2);
             rest = rest_cons.cdr;
         }
@@ -316,20 +348,22 @@ pub const Evaluator = struct {
         return operand_1;
     }
 
-    fn foldPredicate(self: *Evaluator, predicate: Predicate, cdr: AstNode, environment_: *Environment) !AstNode {
+    fn foldPredicate(self: *Evaluator, predicate: Predicate, cdr: AstNode, environment_: *Environment, mode: EvaluatorMode) !AstNode {
+        _ = mode;
+
         if (ast.as(.nil, cdr) != null) {
             return ast.make(.bool, true);
         }
 
         const args = try ast.unwrapObject(.cons, cdr);
 
-        var operand_1 = try self.evaluate(args.car, environment_);
+        var operand_1 = try self.evaluate(args.car, environment_, .strict);
         var rest = args.cdr;
 
         while (ast.as(.nil, rest) == null) {
             const rest_cons = try ast.unwrapObject(.cons, rest);
 
-            const operand_2 = try self.evaluate(rest_cons.car, environment_);
+            const operand_2 = try self.evaluate(rest_cons.car, environment_, .strict);
             const compare_result = try predicate.exec_fn(predicate.ptr, self, operand_1, operand_2);
 
             if (!(try ast.unwrap(.bool, compare_result)).get()) {
