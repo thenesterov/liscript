@@ -111,6 +111,7 @@ pub const EvaluatorContext = struct {
         try self.registerBuiltin(special_forms.Assert);
         try self.registerBuiltin(special_forms.AssertEq);
         try self.registerBuiltin(special_forms.AssertError);
+        try self.registerBuiltin(special_forms.GenSym);
     }
 
     pub fn deinit(self: *EvaluatorContext) void {

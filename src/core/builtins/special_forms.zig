@@ -751,3 +751,15 @@ pub const AssertError = MakeSpecialForm("assert-error", struct {
         );
     }
 }.exec);
+
+pub const GenSym = MakeSpecialForm("gensym", struct {
+    pub fn exec(self: anytype, environment: *Environment, evaluator: *Evaluator, mode: EvaluatorMode, body: AstNode) !AstNode {
+        const this = @as(@TypeOf(self), self);
+        _ = this;
+        _ = environment;
+        _ = mode;
+        _ = body;
+
+        return ast.make(.symbol, try evaluator.context.symbol_table.genSym());
+    }
+}.exec);

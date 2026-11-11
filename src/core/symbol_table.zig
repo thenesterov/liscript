@@ -40,4 +40,15 @@ pub const SymbolTable = struct {
         std.debug.assert(id < self.id_to_string.items.len);
         return self.id_to_string.items[id];
     }
+
+    pub fn genSym(self: *SymbolTable) !Symbol {
+        const new_id: u32 = @intCast(self.id_to_string.items.len);
+
+        const generated_name = try std.fmt.allocPrint(self.allocator, "__gensym{d}__", .{new_id});
+        errdefer self.allocator.free(generated_name);
+
+        try self.id_to_string.append(self.allocator, generated_name);
+
+        return Symbol.fromId(new_id);
+    }
 };
